@@ -1,6 +1,7 @@
 ﻿import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 
+import { scanInstalledApps } from './appScanner';
 import { logger } from './logger';
 import {
   confirmStop,
@@ -9,7 +10,6 @@ import {
   getStatuses,
   savePresets,
   saveSettings,
-  scanInstalledApps,
   startPreset,
   stopPreset,
   subscribeToStatuses,
@@ -140,3 +140,4 @@ app.on('quit', () => {
   unsubscribeStatuses?.();
   logger.info(MODULE_NAME, '应用已退出');
 });
+

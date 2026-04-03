@@ -14,6 +14,11 @@ interface AppPickerProps {
   preset: Preset;
 }
 
+// 为了统一搜索词与应用字段的大小写和字符形态。
+function normalizeSearchText(value: string): string {
+  return value.trim().normalize('NFKC').toLocaleLowerCase();
+}
+
 export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEnsureLoaded, preset }: AppPickerProps) {
   const [search, setSearch] = useState('');
 
@@ -22,6 +27,7 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
   }, [onEnsureLoaded]);
 
   const presetPaths = useMemo(() => new Set(preset.apps.map((appEntry) => appEntry.exePath)), [preset.apps]);
+  const normalizedKeyword = useMemo(() => normalizeSearchText(search), [search]);
 
   const filteredApps = useMemo(
     () =>
@@ -30,14 +36,15 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
           return false;
         }
 
-        const keyword = search.trim().toLowerCase();
-        if (!keyword) {
+        if (!normalizedKeyword) {
           return true;
         }
 
-        return app.name.toLowerCase().includes(keyword) || app.exePath.toLowerCase().includes(keyword);
+        const normalizedName = normalizeSearchText(app.name);
+        const normalizedPath = normalizeSearchText(app.exePath);
+        return normalizedName.includes(normalizedKeyword) || normalizedPath.includes(normalizedKeyword);
       }),
-    [appList, presetPaths, search],
+    [appList, normalizedKeyword, presetPaths],
   );
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
