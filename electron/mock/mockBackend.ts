@@ -4,10 +4,10 @@ import path from 'node:path';
 import type { AppEntry, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../../src/types';
 import { logger } from '../modules/logger';
 import { readPresetsFromStore, savePresets as savePresetsToStore } from '../modules/presetStore';
+import { getSettings as getSettingsFromService, saveSettings as saveSettingsToService } from '../modules/settingsService';
 import { getRuntimePaths } from '../modules/runtimePaths';
 
 interface MockDatabase {
-  settings: Settings;
   runningAppIds: string[];
 }
 
@@ -101,11 +101,6 @@ const installedApps: AppEntry[] = [
 
 function defaultState(): MockDatabase {
   return {
-    settings: {
-      adminMode: false,
-      runInBackground: true,
-      launchOnStartup: false,
-    },
     runningAppIds: ['app-qq', 'app-wechat', 'app-chrome', 'app-word'],
   };
 }
@@ -130,7 +125,6 @@ function readDatabase(): MockDatabase {
     const parsed = JSON.parse(content) as Partial<MockDatabase>;
     const fallback = defaultState();
     return {
-      settings: parsed.settings ?? fallback.settings,
       runningAppIds: parsed.runningAppIds ?? fallback.runningAppIds,
     };
   } catch (error) {
@@ -296,16 +290,12 @@ export async function confirmStop(presetId: string): Promise<void> {
 }
 
 export async function getSettings(): Promise<Settings> {
-  return getDatabase().settings;
+  return getSettingsFromService();
 }
 
 export async function saveSettings(settings: Settings): Promise<Settings> {
-  logger.info(MODULE_NAME, '保存设置项');
-  updateDatabase((current) => ({
-    ...current,
-    settings,
-  }));
-  return settings;
+  logger.info(MODULE_NAME, '委托 settingsService 保存设置项');
+  return saveSettingsToService(settings);
 }
 
 export async function scanInstalledApps(): Promise<ScannedApp[]> {
@@ -318,4 +308,3 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     customProcessNames,
   }));
 }
-

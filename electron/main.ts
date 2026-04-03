@@ -1,25 +1,43 @@
 ﻿import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 
-import { scanInstalledApps } from './modules/appScanner';
+import { registerPresetIpc } from './ipc/registerPresetIpc';
+import { registerScannerIpc } from './ipc/registerScannerIpc';
+import { registerSettingsIpc } from './ipc/registerSettingsIpc';
 import { logger } from './modules/logger';
+import { getSettings, shouldHideWindowOnClose } from './modules/settingsService';
+import { destroyTray, syncTrayState, syncTrayStateFromSettings } from './modules/trayService';
 import {
   confirmStop,
-  getPresets,
-  getSettings,
   getStatuses,
-  savePresets,
-  saveSettings,
   startPreset,
   stopPreset,
   subscribeToStatuses,
 } from './mock/mockBackend';
 import { getRuntimePaths } from './modules/runtimePaths';
 
+const APP_ICON_PATH = path.resolve(process.cwd(), 'assets', 'icons', 'Feibi.png');
+
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 let unsubscribeStatuses: (() => void) | null = null;
 const MODULE_NAME = 'main.ts';
+
+function getMainWindow(): BrowserWindow | null {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return null;
+  }
+
+  return mainWindow;
+}
+
+async function syncTrayWithCurrentSettings(): Promise<void> {
+  const settings = await getSettings();
+  await syncTrayStateFromSettings({
+    settings,
+    getWindow: () => getMainWindow(),
+  });
+}
 
 function configureProjectRuntime(): void {
   const runtimePaths = getRuntimePaths();
@@ -50,21 +68,25 @@ function createWindow(): void {
     backgroundColor: '#FDFBF7',
     title: 'LaunchManager',
     autoHideMenuBar: true,
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  logger.info(MODULE_NAME, '创建主窗口');
+  logger.info(MODULE_NAME, `创建主窗口，图标：${APP_ICON_PATH}`);
 
   mainWindow.on('close', async (event) => {
     if (isQuitting) {
       return;
     }
 
-    const settings = await getSettings();
-    if (settings.runInBackground) {
+    if (await shouldHideWindowOnClose()) {
+      syncTrayState({
+        enabled: true,
+        getWindow: () => getMainWindow(),
+      });
       event.preventDefault();
       mainWindow?.hide();
       logger.info(MODULE_NAME, '根据设置隐藏窗口到后台');
@@ -87,14 +109,19 @@ function createWindow(): void {
 
 function registerIpcHandlers(): void {
   logger.info(MODULE_NAME, '注册 IPC 处理器');
-  ipcMain.handle('preset:getAll', async () => getPresets());
-  ipcMain.handle('preset:save', async (_event, presets) => savePresets(presets));
+  registerPresetIpc();
+  registerScannerIpc();
+  registerSettingsIpc({
+    onSettingsSaved: async (settings) => {
+      await syncTrayStateFromSettings({
+        settings,
+        getWindow: () => getMainWindow(),
+      });
+    },
+  });
   ipcMain.handle('launcher:startPreset', async (_event, presetId: string) => startPreset(presetId));
   ipcMain.handle('killer:stopPreset', async (_event, presetId: string) => stopPreset(presetId));
   ipcMain.handle('killer:confirmStop', async (_event, presetId: string) => confirmStop(presetId));
-  ipcMain.handle('settings:get', async () => getSettings());
-  ipcMain.handle('settings:save', async (_event, settings) => saveSettings(settings));
-  ipcMain.handle('app:scanInstalled', async () => scanInstalledApps());
   ipcMain.handle('monitor:getStatuses', async () => getStatuses());
 
   ipcMain.on('monitor:subscribe', async (event) => {
@@ -109,6 +136,7 @@ app.whenReady().then(() => {
   logger.info(MODULE_NAME, 'Electron 主进程已就绪');
   registerIpcHandlers();
   createWindow();
+  void syncTrayWithCurrentSettings();
 
   unsubscribeStatuses = subscribeToStatuses((statuses) => {
     sendStatuses(statuses);
@@ -138,7 +166,6 @@ app.on('window-all-closed', () => {
 
 app.on('quit', () => {
   unsubscribeStatuses?.();
+  destroyTray();
   logger.info(MODULE_NAME, '应用已退出');
 });
-
-
