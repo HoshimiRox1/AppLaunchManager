@@ -2,6 +2,12 @@ node_modules/
 dist-electron/
 .vite/
 
+AGENTS.md
+前端架构设计.md
+后端架构设计.md
+Codex完整提示词.md
+TODO.md
+
 *.log
 npm-debug.log*
 
