@@ -73,6 +73,9 @@ export default function CustomAppForm({ onAddApp }: CustomAppFormProps) {
             浏览
           </button>
         </div>
+        <div className="flex min-h-12 items-center justify-center rounded-xl border border-dashed border-cream-border bg-cream-surface/65 px-4 text-sm text-cream-textSecondary">
+          将应用文件或快捷方式拖动到此处
+        </div>
         <div className="flex items-center gap-3">
           <button
             className="rounded-xl border border-cream-border px-4 py-2.5 text-sm text-cream-textPrimary transition hover:bg-cream-surface"

@@ -16,7 +16,7 @@ interface ConfirmState {
 }
 
 export default function App() {
-  const { presets, isLoading, createPreset, updatePreset, reorderPresets } = usePresets();
+  const { presets, isLoading, createPreset, updatePreset, deletePreset, reorderPresets } = usePresets();
   const { getPresetStatus } = useProcessStatus();
   const { settings, updateSetting } = useSettings();
   const appListState = useAppList();
@@ -32,6 +32,11 @@ export default function App() {
     setExpandedPresetId(presetId);
   };
 
+  const handleDeletePreset = async (presetId: string) => {
+    await deletePreset(presetId);
+    setExpandedPresetId((current) => (current === presetId ? null : current));
+  };
+
   const handleConfirmClose = async () => {
     if (!confirmState) {
       return;
@@ -43,14 +48,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-cream-bg text-cream-textPrimary">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-6 pb-24 pt-6 sm:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-6 pb-0 pt-6 sm:px-8">
         <TopBar onCreatePreset={handleCreatePreset} />
-        <main className="mt-6 flex-1 overflow-hidden rounded-[28px] border border-cream-border/70 bg-white/30 p-3 shadow-card">
+        <main className="mx-[88px] mt-6 flex-1 overflow-hidden rounded-t-[28px] border-x border-t border-cream-border/70 bg-white/30 p-3 shadow-card">
           <PresetList
             appListState={appListState}
             expandedPresetId={expandedPresetId}
             getPresetStatus={getPresetStatus}
             isLoading={isLoading}
+            onDeletePreset={handleDeletePreset}
             onExpandedPresetChange={setExpandedPresetId}
             onRequestConfirm={setConfirmState}
             onReorderPresets={reorderPresets}

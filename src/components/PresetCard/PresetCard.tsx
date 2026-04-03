@@ -1,4 +1,5 @@
 ﻿import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 
 import type { Preset, PresetStatus, ScannedApp } from '../../types';
 import PresetCardCollapsed from './PresetCardCollapsed';
@@ -6,8 +7,10 @@ import PresetCardExpanded from './PresetCardExpanded';
 
 interface PresetCardProps {
   appList: ScannedApp[];
+  dragHandle: ReactNode;
   isAppListLoading: boolean;
   isExpanded: boolean;
+  onDeletePreset: (presetId: string) => Promise<void>;
   onEnsureAppListLoaded: () => Promise<void>;
   onExpandChange: (nextValue: boolean) => void;
   onRequestConfirm: (payload: { presetId: string; riskyApps: string[] }) => void;
@@ -18,8 +21,10 @@ interface PresetCardProps {
 
 export default function PresetCard({
   appList,
+  dragHandle,
   isAppListLoading,
   isExpanded,
+  onDeletePreset,
   onEnsureAppListLoaded,
   onExpandChange,
   onRequestConfirm,
@@ -73,13 +78,14 @@ export default function PresetCard({
           isAppListLoading={isAppListLoading}
           onEnsureAppListLoaded={onEnsureAppListLoaded}
           onExpandChange={onExpandChange}
-          onRequestConfirm={onRequestConfirm}
           onUpdatePreset={onUpdatePreset}
           preset={preset}
           status={status}
         />
       ) : (
         <PresetCardCollapsed
+          dragHandle={dragHandle}
+          onDeletePreset={onDeletePreset}
           onRequestConfirm={onRequestConfirm}
           onRename={(name) => void onUpdatePreset(preset.id, (current) => ({ ...current, name }))}
           preset={preset}

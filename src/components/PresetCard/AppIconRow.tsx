@@ -10,7 +10,7 @@ export default function AppIconRow({ apps }: AppIconRowProps) {
   const hiddenCount = Math.max(apps.length - visibleApps.length, 0);
 
   return (
-    <div className="flex items-center gap-2 overflow-hidden" onClick={(event) => event.stopPropagation()}>
+    <div className="flex items-center gap-2 overflow-hidden">
       {visibleApps.map((appEntry) => (
         <AppAvatar iconPath={appEntry.iconPath} key={appEntry.id} name={appEntry.name} size="sm" />
       ))}

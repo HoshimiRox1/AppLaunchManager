@@ -5,13 +5,22 @@
 export default function SettingsButton({ onClick }: SettingsButtonProps) {
   return (
     <button
+      aria-label="打开设置"
       className="fixed bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full border border-cream-border bg-cream-surface text-cream-textPrimary shadow-card transition duration-200 hover:-translate-y-1 hover:shadow-hover"
       onClick={onClick}
       type="button"
     >
-      <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-        <path d="M10.325 4.317a1 1 0 0 1 1.35-.936l.532.218a1 1 0 0 0 .77 0l.531-.218a1 1 0 0 1 1.351.936v.575a1 1 0 0 0 .293.707l.406.407a1 1 0 0 0 .707.293h.575a1 1 0 0 1 .936 1.35l-.218.532a1 1 0 0 0 0 .77l.218.531a1 1 0 0 1-.936 1.351h-.575a1 1 0 0 0-.707.293l-.406.406a1 1 0 0 0-.293.707v.575a1 1 0 0 1-1.351.936l-.531-.218a1 1 0 0 0-.77 0l-.532.218a1 1 0 0 1-1.35-.936v-.575a1 1 0 0 0-.293-.707l-.407-.406a1 1 0 0 0-.707-.293h-.575a1 1 0 0 1-.936-1.351l.218-.531a1 1 0 0 0 0-.77l-.218-.532a1 1 0 0 1 .936-1.35h.575a1 1 0 0 0 .707-.293l.407-.407a1 1 0 0 0 .293-.707v-.575Z" />
-        <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
+      <svg
+        className="h-6 w-6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+        viewBox="0 0 24 24"
+      >
+        <path d="M10.63 3.51c.52-1.35 2.22-1.35 2.74 0l.22.59c.2.51.77.77 1.29.63l.61-.16c1.4-.37 2.6.83 2.23 2.23l-.16.61c-.14.52.12 1.09.63 1.29l.59.22c1.35.52 1.35 2.22 0 2.74l-.59.22c-.51.2-.77.77-.63 1.29l.16.61c.37 1.4-.83 2.6-2.23 2.23l-.61-.16c-.52-.14-1.09.12-1.29.63l-.22.59c-.52 1.35-2.22 1.35-2.74 0l-.22-.59c-.2-.51-.77-.77-1.29-.63l-.61.16c-1.4.37-2.6-.83-2.23-2.23l.16-.61c.14-.52-.12-1.09-.63-1.29l-.59-.22c-1.35-.52-1.35-2.22 0-2.74l.59-.22c.51-.2.77-.77.63-1.29l-.16-.61c-.37-1.4.83-2.6 2.23-2.23l.61.16c.52.14 1.09-.12 1.29-.63l.22-.59Z" />
+        <circle cx="12" cy="12" r="3.25" />
       </svg>
     </button>
   );

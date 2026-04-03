@@ -1,4 +1,5 @@
 ﻿import { useMemo } from 'react';
+import type { ReactNode } from 'react';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -13,6 +14,7 @@ interface PresetListProps {
   expandedPresetId: string | null;
   getPresetStatus: (presetId: string) => PresetStatus;
   isLoading: boolean;
+  onDeletePreset: (presetId: string) => Promise<void>;
   onExpandedPresetChange: (presetId: string | null) => void;
   onRequestConfirm: (payload: { presetId: string; riskyApps: string[] }) => void;
   onReorderPresets: (nextPresets: Preset[]) => Promise<void>;
@@ -24,42 +26,75 @@ interface SortablePresetItemProps {
   appListState: ReturnType<typeof useAppList>;
   getPresetStatus: (presetId: string) => PresetStatus;
   isExpanded: boolean;
+  onDeletePreset: (presetId: string) => Promise<void>;
   onExpandedPresetChange: (presetId: string | null) => void;
   onRequestConfirm: (payload: { presetId: string; riskyApps: string[] }) => void;
   onUpdatePreset: (presetId: string, updater: (preset: Preset) => Preset) => Promise<void>;
   preset: Preset;
 }
 
+function DragHandleIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+      <path d="M9 5h.01" />
+      <path d="M9 12h.01" />
+      <path d="M9 19h.01" />
+      <path d="M15 5h.01" />
+      <path d="M15 12h.01" />
+      <path d="M15 19h.01" />
+    </svg>
+  );
+}
+
 function SortablePresetItem({
   appListState,
   getPresetStatus,
   isExpanded,
+  onDeletePreset,
   onExpandedPresetChange,
   onRequestConfirm,
   onUpdatePreset,
   preset,
 }: SortablePresetItemProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: preset.id });
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: preset.id,
+    disabled: isExpanded,
+  });
+
+  const dragHandle: ReactNode = isExpanded ? null : (
+    <button
+      aria-label="拖动预设排序"
+      className="flex h-9 w-9 items-center justify-center rounded-xl border border-cream-border bg-white/70 text-cream-textSecondary transition hover:bg-white hover:text-cream-textPrimary"
+      onClick={(event) => event.stopPropagation()}
+      ref={setActivatorNodeRef}
+      style={{ touchAction: 'none' }}
+      type="button"
+      {...attributes}
+      {...listeners}
+    >
+      <DragHandleIcon />
+    </button>
+  );
 
   return (
     <div
-      className={isDragging ? 'z-20' : ''}
+      className={isDragging ? 'z-20 mb-4' : 'mb-4'}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
-      <div className="mb-4" {...attributes} {...listeners}>
-        <PresetCard
-          appList={appListState.appList}
-          isAppListLoading={appListState.isLoading}
-          isExpanded={isExpanded}
-          onEnsureAppListLoaded={appListState.ensureLoaded}
-          onExpandChange={(nextValue) => onExpandedPresetChange(nextValue ? preset.id : null)}
-          onRequestConfirm={onRequestConfirm}
-          onUpdatePreset={onUpdatePreset}
-          preset={preset}
-          status={getPresetStatus(preset.id)}
-        />
-      </div>
+      <PresetCard
+        appList={appListState.appList}
+        dragHandle={dragHandle}
+        isAppListLoading={appListState.isLoading}
+        isExpanded={isExpanded}
+        onDeletePreset={onDeletePreset}
+        onEnsureAppListLoaded={appListState.ensureLoaded}
+        onExpandChange={(nextValue) => onExpandedPresetChange(nextValue ? preset.id : null)}
+        onRequestConfirm={onRequestConfirm}
+        onUpdatePreset={onUpdatePreset}
+        preset={preset}
+        status={getPresetStatus(preset.id)}
+      />
     </div>
   );
 }
@@ -69,6 +104,7 @@ export default function PresetList({
   expandedPresetId,
   getPresetStatus,
   isLoading,
+  onDeletePreset,
   onExpandedPresetChange,
   onRequestConfirm,
   onReorderPresets,
@@ -120,6 +156,7 @@ export default function PresetList({
               getPresetStatus={getPresetStatus}
               isExpanded={expandedPresetId === preset.id}
               key={preset.id}
+              onDeletePreset={onDeletePreset}
               onExpandedPresetChange={onExpandedPresetChange}
               onRequestConfirm={onRequestConfirm}
               onUpdatePreset={onUpdatePreset}

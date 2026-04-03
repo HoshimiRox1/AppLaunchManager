@@ -4,7 +4,7 @@
 
 export default function TopBar({ onCreatePreset }: TopBarProps) {
   return (
-    <header className="flex items-center justify-between gap-4 rounded-[28px] border border-cream-border/80 bg-cream-surface/90 px-6 py-5 shadow-card backdrop-blur">
+    <header className="mx-[88px] flex items-center justify-between gap-4 py-3">
       <div>
         <p className="text-xs uppercase tracking-[0.28em] text-cream-textSecondary">Workspace Launcher</p>
         <h1 className="mt-2 text-2xl font-semibold text-cream-textPrimary">LaunchManager</h1>

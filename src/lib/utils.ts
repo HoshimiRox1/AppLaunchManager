@@ -83,7 +83,7 @@ export function sortedPresets(presets: Preset[]): Preset[] {
 }
 
 export function normalizePresetOrders(presets: Preset[]): Preset[] {
-  return sortedPresets(presets).map((preset, index) => ({
+  return presets.map((preset, index) => ({
     ...preset,
     order: index,
   }));

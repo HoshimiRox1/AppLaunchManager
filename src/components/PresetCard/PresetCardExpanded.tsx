@@ -3,7 +3,6 @@
 import type { AppEntry, Preset, PresetStatus, ScannedApp } from '../../types';
 import { ensurePresetHasApp, reorderItems } from '../../lib/utils';
 import AppPicker from '../AppPicker/AppPicker';
-import ActionButtons from '../ActionButtons';
 import SortableAppGrid from '../SortableAppGrid';
 import StatusBadge from '../StatusBadge';
 
@@ -12,7 +11,6 @@ interface PresetCardExpandedProps {
   isAppListLoading: boolean;
   onEnsureAppListLoaded: () => Promise<void>;
   onExpandChange: (nextValue: boolean) => void;
-  onRequestConfirm: (payload: { presetId: string; riskyApps: string[] }) => void;
   onUpdatePreset: (presetId: string, updater: (preset: Preset) => Preset) => Promise<void>;
   preset: Preset;
   status: PresetStatus;
@@ -23,12 +21,12 @@ export default function PresetCardExpanded({
   isAppListLoading,
   onEnsureAppListLoaded,
   onExpandChange,
-  onRequestConfirm,
   onUpdatePreset,
   preset,
   status,
 }: PresetCardExpandedProps) {
   const [isPickerOpen, setIsPickerOpen] = useState(preset.apps.length === 0);
+  const [initialPreset] = useState<Preset>(() => structuredClone(preset));
 
   const updateApps = (updater: (apps: AppEntry[]) => AppEntry[]) =>
     onUpdatePreset(preset.id, (current) => ({
@@ -45,6 +43,11 @@ export default function PresetCardExpanded({
     setIsPickerOpen(false);
   };
 
+  const handleCancel = async () => {
+    await onUpdatePreset(preset.id, () => structuredClone(initialPreset));
+    onExpandChange(false);
+  };
+
   return (
     <div className="space-y-5" onClick={(event) => event.stopPropagation()}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -57,7 +60,14 @@ export default function PresetCardExpanded({
           />
           <StatusBadge runningCount={status.runningCount} status={status.status} totalCount={status.totalCount} />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="rounded-xl border border-cream-border px-4 py-2.5 text-sm text-cream-textPrimary transition hover:bg-white"
+            onClick={() => void handleCancel()}
+            type="button"
+          >
+            取消
+          </button>
           <button
             className="rounded-xl border border-cream-border px-4 py-2.5 text-sm text-cream-textPrimary transition hover:bg-white"
             onClick={() => onExpandChange(false)}
@@ -65,7 +75,6 @@ export default function PresetCardExpanded({
           >
             完成
           </button>
-          <ActionButtons onRequestConfirm={onRequestConfirm} presetId={preset.id} />
         </div>
       </div>
 
