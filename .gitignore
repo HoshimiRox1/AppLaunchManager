@@ -1,0 +1,9 @@
+node_modules/
+dist-electron/
+.vite/
+
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
