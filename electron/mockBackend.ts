@@ -3,10 +3,10 @@ import path from 'node:path';
 
 import type { AppEntry, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../src/types';
 import { logger } from './logger';
+import { readPresetsFromStore, savePresets as savePresetsToStore } from './presetStore';
 import { getRuntimePaths } from './runtimePaths';
 
 interface MockDatabase {
-  presets: Preset[];
   settings: Settings;
   runningAppIds: string[];
 }
@@ -101,24 +101,6 @@ const installedApps: AppEntry[] = [
 
 function defaultState(): MockDatabase {
   return {
-    presets: [
-      {
-        id: 'preset-work',
-        name: '办公模式',
-        order: 0,
-        apps: installedApps
-          .filter((appEntry) => ['app-qq', 'app-wechat', 'app-chrome', 'app-notion'].includes(appEntry.id))
-          .map((appEntry) => ({ ...appEntry })),
-      },
-      {
-        id: 'preset-focus',
-        name: '专注开发',
-        order: 1,
-        apps: installedApps
-          .filter((appEntry) => ['app-code', 'app-word', 'app-spotify'].includes(appEntry.id))
-          .map((appEntry) => ({ ...appEntry })),
-      },
-    ],
     settings: {
       adminMode: false,
       runInBackground: true,
@@ -148,7 +130,6 @@ function readDatabase(): MockDatabase {
     const parsed = JSON.parse(content) as Partial<MockDatabase>;
     const fallback = defaultState();
     return {
-      presets: parsed.presets ?? fallback.presets,
       settings: parsed.settings ?? fallback.settings,
       runningAppIds: parsed.runningAppIds ?? fallback.runningAppIds,
     };
@@ -169,10 +150,12 @@ function getDatabase(): MockDatabase {
   return readDatabase();
 }
 
+// 为了基于 presetStore 和当前运行态生成状态摘要。
 function buildStatuses(db: MockDatabase): PresetStatus[] {
   const runningIds = new Set(db.runningAppIds);
+  const presets = readPresetsFromStore();
 
-  return db.presets
+  return presets
     .slice()
     .sort((left, right) => left.order - right.order)
     .map((preset) => {
@@ -227,18 +210,20 @@ export async function getStatuses(): Promise<PresetStatus[]> {
 }
 
 export async function getPresets(): Promise<Preset[]> {
-  return getDatabase()
-    .presets.slice()
+  return readPresetsFromStore()
+    .slice()
     .sort((left, right) => left.order - right.order);
 }
 
 export async function savePresets(presets: Preset[]): Promise<void> {
   logger.info(MODULE_NAME, `保存预设列表，数量：${presets.length}`);
+  await savePresetsToStore(presets);
+
+  const savedPresets = readPresetsFromStore();
   updateDatabase((current) => {
-    const validAppIds = new Set(presets.flatMap((preset) => preset.apps.map((appEntry) => appEntry.id)));
+    const validAppIds = new Set(savedPresets.flatMap((preset) => preset.apps.map((appEntry) => appEntry.id)));
     return {
       ...current,
-      presets,
       runningAppIds: current.runningAppIds.filter((appId) => validAppIds.has(appId)),
     };
   });
@@ -247,7 +232,7 @@ export async function savePresets(presets: Preset[]): Promise<void> {
 export async function startPreset(presetId: string): Promise<void> {
   logger.info(MODULE_NAME, `启动预设：${presetId}`);
   updateDatabase((current) => {
-    const preset = current.presets.find((item) => item.id === presetId);
+    const preset = readPresetsFromStore().find((item) => item.id === presetId);
     if (!preset) {
       return current;
     }
@@ -267,7 +252,7 @@ export async function stopPreset(
 ): Promise<{ needsConfirm: boolean; riskyApps: string[] }> {
   logger.info(MODULE_NAME, `尝试关闭预设：${presetId}`);
   const current = getDatabase();
-  const preset = current.presets.find((item) => item.id === presetId);
+  const preset = readPresetsFromStore().find((item) => item.id === presetId);
 
   if (!preset) {
     return {
@@ -297,7 +282,7 @@ export async function stopPreset(
 export async function confirmStop(presetId: string): Promise<void> {
   logger.info(MODULE_NAME, `确认关闭预设：${presetId}`);
   updateDatabase((current) => {
-    const preset = current.presets.find((item) => item.id === presetId);
+    const preset = readPresetsFromStore().find((item) => item.id === presetId);
     if (!preset) {
       return current;
     }
