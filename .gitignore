@@ -8,6 +8,7 @@ AGENTS.md
 后端架构设计.md
 Codex完整提示词.md
 TODO.md
+preset-manager-handoff.md
 
 *.log
 npm-debug.log*
