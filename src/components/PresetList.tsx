@@ -35,7 +35,15 @@ interface SortablePresetItemProps {
 
 function DragHandleIcon() {
   return (
-    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+    <svg
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
       <path d="M9 5h.01" />
       <path d="M9 12h.01" />
       <path d="M9 19h.01" />
@@ -61,6 +69,13 @@ function SortablePresetItem({
     disabled: isExpanded,
   });
 
+  const verticalTransform = transform
+    ? {
+        ...transform,
+        x: 0,
+      }
+    : null;
+
   const dragHandle: ReactNode = isExpanded ? null : (
     <button
       aria-label="拖动预设排序"
@@ -80,7 +95,7 @@ function SortablePresetItem({
     <div
       className={isDragging ? 'z-20 mb-4' : 'mb-4'}
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      style={{ transform: CSS.Transform.toString(verticalTransform), transition }}
     >
       <PresetCard
         appList={appListState.appList}
