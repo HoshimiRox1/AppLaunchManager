@@ -8,7 +8,7 @@ import { registerScannerIpc } from './ipc/registerScannerIpc';
 import { registerSettingsIpc } from './ipc/registerSettingsIpc';
 import { startPreset } from './modules/appLauncher';
 import { confirmStop, stopPreset } from './modules/appKiller';
-import { APP_ID, getAppIconPath } from './modules/iconPaths';
+import { getAppIconPath, getAppId } from './modules/iconPaths';
 import { logger } from './modules/logger';
 import { getStatuses, startMonitoring, stopMonitoring, subscribeToStatuses } from './modules/appMonitor';
 import { getRuntimePaths } from './modules/runtimePaths';
@@ -45,8 +45,9 @@ function configureProjectRuntime(): void {
   app.commandLine.appendSwitch('disk-cache-dir', runtimePaths.cacheDir);
 
   if (process.platform === 'win32') {
-    app.setAppUserModelId(APP_ID);
-    logger.info(MODULE_NAME, `Windows 应用标识已设置：${APP_ID}`);
+    const appId = getAppId();
+    app.setAppUserModelId(appId);
+    logger.info(MODULE_NAME, `Windows ????????${appId}`);
   }
 
   logger.info(MODULE_NAME, `运行时目录已初始化：${runtimePaths.runtimeRoot}`);
@@ -198,3 +199,5 @@ app.on('quit', () => {
   destroyTray();
   logger.info(MODULE_NAME, '应用已退出');
 });
+
+
