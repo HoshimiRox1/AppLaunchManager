@@ -4,7 +4,7 @@ import path from 'node:path';
 import { shell } from 'electron';
 import { enumerateKeysSafe, enumerateValuesSafe, HKEY } from 'registry-js';
 
-import type { ScannedApp } from '../src/types';
+import type { ScannedApp } from '../../src/types';
 import { logger } from './logger';
 
 interface RegistryBranch {
@@ -703,4 +703,5 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     return [];
   }
 }
+
 

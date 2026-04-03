@@ -1,7 +1,7 @@
 ﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import type { AppEntry, Preset } from '../src/types';
+import type { AppEntry, Preset } from '../../src/types';
 import { logger } from './logger';
 import { getRuntimePaths } from './runtimePaths';
 
@@ -271,3 +271,4 @@ export async function getPresets(): Promise<Preset[]> {
 export async function savePresets(presets: Preset[]): Promise<void> {
   writePresetsToStore(presets);
 }
+

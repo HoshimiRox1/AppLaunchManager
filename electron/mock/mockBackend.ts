@@ -1,10 +1,10 @@
 ﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import type { AppEntry, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../src/types';
-import { logger } from './logger';
-import { readPresetsFromStore, savePresets as savePresetsToStore } from './presetStore';
-import { getRuntimePaths } from './runtimePaths';
+import type { AppEntry, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../../src/types';
+import { logger } from '../modules/logger';
+import { readPresetsFromStore, savePresets as savePresetsToStore } from '../modules/presetStore';
+import { getRuntimePaths } from '../modules/runtimePaths';
 
 interface MockDatabase {
   settings: Settings;
@@ -318,3 +318,4 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     customProcessNames,
   }));
 }
+

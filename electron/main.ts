@@ -1,8 +1,8 @@
 ﻿import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 
-import { scanInstalledApps } from './appScanner';
-import { logger } from './logger';
+import { scanInstalledApps } from './modules/appScanner';
+import { logger } from './modules/logger';
 import {
   confirmStop,
   getPresets,
@@ -13,8 +13,8 @@ import {
   startPreset,
   stopPreset,
   subscribeToStatuses,
-} from './mockBackend';
-import { getRuntimePaths } from './runtimePaths';
+} from './mock/mockBackend';
+import { getRuntimePaths } from './modules/runtimePaths';
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
@@ -140,4 +140,5 @@ app.on('quit', () => {
   unsubscribeStatuses?.();
   logger.info(MODULE_NAME, '应用已退出');
 });
+
 
