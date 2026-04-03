@@ -5,10 +5,11 @@
   "description": "LaunchManager Electron UI prototype",
   "main": "./dist-electron/main/index.js",
   "scripts": {
-    "dev": "vite",
-    "dev:electron": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "dev": "node scripts/electron-runner.cjs dev",
+    "dev:web": "vite",
+    "dev:electron": "node scripts/electron-runner.cjs dev",
+    "build": "node scripts/electron-runner.cjs build",
+    "preview": "node scripts/electron-runner.cjs preview"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
