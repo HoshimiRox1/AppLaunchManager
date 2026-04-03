@@ -9,6 +9,7 @@ AGENTS.md
 Codex完整提示词.md
 TODO.md
 preset-manager-handoff.md
+launch_manager_项目重整架构文档.md
 
 *.log
 npm-debug.log*

@@ -95,7 +95,6 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
             key={app.exePath}
             onSelect={(selected) => {
               onAddApp(toAppEntry(selected));
-              onClose();
             }}
           />
         ))}

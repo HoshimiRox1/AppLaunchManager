@@ -40,7 +40,6 @@ export default function PresetCardExpanded({
     }
 
     void updateApps((apps) => [...apps, appEntry]);
-    setIsPickerOpen(false);
   };
 
   const handleCancel = async () => {
