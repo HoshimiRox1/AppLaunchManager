@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, nativeImage } from 'electron';
 import path from 'node:path';
 
 import type { AppStatus } from '../src/types';
@@ -6,15 +6,14 @@ import { registerPathIpc } from './ipc/registerPathIpc';
 import { registerPresetIpc } from './ipc/registerPresetIpc';
 import { registerScannerIpc } from './ipc/registerScannerIpc';
 import { registerSettingsIpc } from './ipc/registerSettingsIpc';
-import { logger } from './modules/logger';
 import { startPreset } from './modules/appLauncher';
 import { confirmStop, stopPreset } from './modules/appKiller';
+import { APP_ID, getAppIconPath } from './modules/iconPaths';
+import { logger } from './modules/logger';
 import { getStatuses, startMonitoring, stopMonitoring, subscribeToStatuses } from './modules/appMonitor';
 import { getRuntimePaths } from './modules/runtimePaths';
 import { getSettings, shouldHideWindowOnClose } from './modules/settingsService';
 import { destroyTray, syncTrayState, syncTrayStateFromSettings } from './modules/trayService';
-
-const APP_ICON_PATH = path.resolve(process.cwd(), 'assets', 'icons', 'Feibi.png');
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
@@ -45,7 +44,29 @@ function configureProjectRuntime(): void {
   app.setPath('logs', runtimePaths.logsDir);
   app.commandLine.appendSwitch('disk-cache-dir', runtimePaths.cacheDir);
 
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(APP_ID);
+    logger.info(MODULE_NAME, `Windows 应用标识已设置：${APP_ID}`);
+  }
+
   logger.info(MODULE_NAME, `运行时目录已初始化：${runtimePaths.runtimeRoot}`);
+}
+
+// 为了加载当前环境下可复用的主窗口图标资源。
+function loadAppIcon() {
+  const appIconPath = getAppIconPath();
+  const appIcon = nativeImage.createFromPath(appIconPath);
+
+  if (appIcon.isEmpty()) {
+    logger.warn(MODULE_NAME, `应用图标加载失败：${appIconPath}`);
+  } else {
+    logger.info(MODULE_NAME, `应用图标加载成功：${appIconPath}`);
+  }
+
+  return {
+    appIcon,
+    appIconPath,
+  };
 }
 
 // 为了把最新应用状态推送到当前 renderer 进程。
@@ -59,6 +80,8 @@ function sendStatuses(statuses: AppStatus[]): void {
 }
 
 function createWindow(): void {
+  const { appIcon, appIconPath } = loadAppIcon();
+
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -67,14 +90,18 @@ function createWindow(): void {
     backgroundColor: '#FDFBF7',
     title: 'LaunchManager',
     autoHideMenuBar: true,
-    icon: APP_ICON_PATH,
+    icon: appIcon.isEmpty() ? undefined : appIcon,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  logger.info(MODULE_NAME, `创建主窗口，图标：${APP_ICON_PATH}`);
+  logger.info(MODULE_NAME, `创建主窗口，图标：${appIconPath}`);
+
+  if (!appIcon.isEmpty()) {
+    mainWindow.setIcon(appIcon);
+  }
 
   mainWindow.on('close', async (event) => {
     if (isQuitting) {

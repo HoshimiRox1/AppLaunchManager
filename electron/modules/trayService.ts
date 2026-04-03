@@ -1,25 +1,22 @@
 ﻿import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron';
-import path from 'node:path';
 
 import type { Settings } from '../../src/types';
+import { getAppIconPath } from './iconPaths';
 import { logger } from './logger';
 
 const MODULE_NAME = 'trayService.ts';
-const ICON_RELATIVE_PATH = path.join('assets', 'icons', 'Feibi.png');
 
 let tray: Tray | null = null;
 let getMainWindow: (() => BrowserWindow | null) | null = null;
 
-// 为了定位当前项目使用的托盘图标文件。
-function getTrayIconPath(): string {
-  return path.resolve(process.cwd(), ICON_RELATIVE_PATH);
-}
-
 // 为了生成当前可复用的托盘图标资源。
 function createTrayIcon() {
-  const icon = nativeImage.createFromPath(getTrayIconPath());
+  const iconPath = getAppIconPath();
+  const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) {
-    logger.warn(MODULE_NAME, `托盘图标加载失败：${getTrayIconPath()}`);
+    logger.warn(MODULE_NAME, `托盘图标加载失败：${iconPath}`);
+  } else {
+    logger.info(MODULE_NAME, `托盘图标加载成功：${iconPath}`);
   }
 
   return icon.resize({ width: 16, height: 16 });
