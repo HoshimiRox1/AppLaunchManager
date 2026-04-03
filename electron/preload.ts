@@ -1,6 +1,6 @@
 ﻿import { contextBridge, ipcRenderer } from 'electron';
 
-import type { ElectronAPI, PresetStatus } from '../src/types';
+import type { AppStatus, ElectronAPI } from '../src/types';
 
 const electronAPI: ElectronAPI = {
   presetGetAll: () => ipcRenderer.invoke('preset:getAll'),
@@ -11,9 +11,11 @@ const electronAPI: ElectronAPI = {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSave: (settings) => ipcRenderer.invoke('settings:save', settings),
   appScanInstalled: () => ipcRenderer.invoke('app:scanInstalled'),
+  pathGetDefaultInstallDir: (filePath) => ipcRenderer.invoke('path:getDefaultInstallDir', filePath),
+  pathGetParentDir: (directoryPath) => ipcRenderer.invoke('path:getParentDir', directoryPath),
   getCurrentStatuses: () => ipcRenderer.invoke('monitor:getStatuses'),
   onStatusUpdate: (callback) => {
-    const handler = (_event: Electron.IpcRendererEvent, statuses: PresetStatus[]) => callback(statuses);
+    const handler = (_event: Electron.IpcRendererEvent, statuses: AppStatus[]) => callback(statuses);
     ipcRenderer.on('monitor:statusUpdate', handler);
     ipcRenderer.send('monitor:subscribe');
 

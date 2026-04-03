@@ -1,7 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 
 import type { AppEntry, Preset, ScannedApp } from '../../types';
-import { createCustomAppEntry, toAppEntry } from '../../lib/utils';
 import AppPickerItem from './AppPickerItem';
 import CustomAppForm from './CustomAppForm';
 
@@ -14,13 +13,32 @@ interface AppPickerProps {
   preset: Preset;
 }
 
+interface DraftApp {
+  name: string;
+  exePath: string;
+  installDir: string;
+  iconPath: string;
+}
+
 // 为了统一搜索词与应用字段的大小写和字符形态。
 function normalizeSearchText(value: string): string {
   return value.trim().normalize('NFKC').toLocaleLowerCase();
 }
 
+// 为了把扫描结果转换成可在添加表单中继续编辑的草稿。
+async function buildDraftFromScannedApp(app: ScannedApp): Promise<DraftApp> {
+  const installDir = await window.electronAPI.pathGetDefaultInstallDir(app.exePath);
+  return {
+    name: app.name,
+    exePath: app.exePath,
+    installDir,
+    iconPath: app.iconPath,
+  };
+}
+
 export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEnsureLoaded, preset }: AppPickerProps) {
   const [search, setSearch] = useState('');
+  const [draftApp, setDraftApp] = useState<DraftApp | null>(null);
 
   useEffect(() => {
     void onEnsureLoaded();
@@ -47,17 +65,25 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
     [appList, normalizedKeyword, presetPaths],
   );
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  // 为了把拖入的可执行文件预填到统一的应用添加表单里。
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const files = Array.from(event.dataTransfer.files);
+    const file = Array.from(event.dataTransfer.files).find((current) => Boolean((current as File & { path?: string }).path));
+    if (!file) {
+      return;
+    }
 
-    files.forEach((file) => {
-      const filePath = (file as File & { path?: string }).path;
-      if (!filePath) {
-        return;
-      }
+    const filePath = (file as File & { path?: string }).path;
+    if (!filePath) {
+      return;
+    }
 
-      onAddApp(createCustomAppEntry({ exePath: filePath, iconPath: '' }));
+    const installDir = await window.electronAPI.pathGetDefaultInstallDir(filePath);
+    setDraftApp({
+      name: '',
+      exePath: filePath,
+      installDir,
+      iconPath: '',
     });
   };
 
@@ -66,7 +92,7 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
       className="mt-4 rounded-[24px] border border-cream-border bg-cream-bg/80 p-4 shadow-card transition duration-200"
       onClick={(event) => event.stopPropagation()}
       onDragOver={(event) => event.preventDefault()}
-      onDrop={handleDrop}
+      onDrop={(event) => void handleDrop(event)}
     >
       <div className="flex items-center justify-between gap-3">
         <input
@@ -94,14 +120,14 @@ export default function AppPicker({ appList, isLoading, onAddApp, onClose, onEns
             app={app}
             key={app.exePath}
             onSelect={(selected) => {
-              onAddApp(toAppEntry(selected));
+              void buildDraftFromScannedApp(selected).then((nextDraftApp) => setDraftApp(nextDraftApp));
             }}
           />
         ))}
       </div>
 
       <div className="my-4 border-t border-dashed border-cream-border" />
-      <CustomAppForm onAddApp={onAddApp} />
+      <CustomAppForm draftApp={draftApp} onAddApp={onAddApp} onDraftConsumed={() => setDraftApp(null)} />
     </div>
   );
 }

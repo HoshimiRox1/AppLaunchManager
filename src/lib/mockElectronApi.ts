@@ -1,5 +1,5 @@
-﻿import type { ElectronAPI, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../types';
-import { normalizePresetOrders, toAppEntry } from './utils';
+﻿import type { AppStatus, ElectronAPI, Preset, ScannedApp, Settings } from '../types';
+import { normalizePresetOrders, pathBaseName, toAppEntry } from './utils';
 
 interface MockState {
   presets: Preset[];
@@ -8,9 +8,8 @@ interface MockState {
 }
 
 const STORAGE_KEY = 'launch-manager-ui-prototype';
-const listeners = new Set<(statuses: PresetStatus[]) => void>();
-
-const HIGH_RISK_PROCESSES = new Set([
+const listeners = new Set<(statuses: AppStatus[]) => void>();
+const HIGH_RISK_PROCESS_NAMES = new Set([
   'winword.exe',
   'excel.exe',
   'powerpnt.exe',
@@ -25,65 +24,131 @@ const scannedApps: ScannedApp[] = [
     exePath: 'C:\\Program Files\\Tencent\\QQ\\QQ.exe',
     installDir: 'C:\\Program Files\\Tencent\\QQ',
     iconPath: '',
-    customProcessNames: ['qq.exe'],
   },
   {
     name: '微信',
     exePath: 'C:\\Program Files\\Tencent\\WeChat\\WeChat.exe',
     installDir: 'C:\\Program Files\\Tencent\\WeChat',
     iconPath: '',
-    customProcessNames: ['wechat.exe'],
   },
   {
     name: 'Chrome',
     exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     installDir: 'C:\\Program Files\\Google\\Chrome\\Application',
     iconPath: '',
-    customProcessNames: ['chrome.exe'],
   },
   {
     name: 'Notion',
     exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion\\Notion.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion',
     iconPath: '',
-    customProcessNames: ['notion.exe'],
   },
   {
     name: 'Spotify',
     exePath: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify\\Spotify.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify',
     iconPath: '',
-    customProcessNames: ['spotify.exe'],
   },
   {
     name: 'Steam',
     exePath: 'C:\\Program Files (x86)\\Steam\\steam.exe',
     installDir: 'C:\\Program Files (x86)\\Steam',
     iconPath: '',
-    customProcessNames: ['steam.exe'],
   },
   {
     name: 'Discord',
     exePath: 'C:\\Users\\Public\\AppData\\Local\\Discord\\Update.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Local\\Discord',
     iconPath: '',
-    customProcessNames: ['discord.exe'],
   },
   {
     name: 'Word',
     exePath: 'C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE',
     installDir: 'C:\\Program Files\\Microsoft Office\\root\\Office16',
     iconPath: '',
-    customProcessNames: ['winword.exe'],
   },
   {
     name: 'VS Code',
     exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code',
     iconPath: '',
-    customProcessNames: ['code.exe'],
   },
 ];
+
+// 为了在浏览器兜底环境里推导默认监测目录。
+function getDefaultInstallDir(filePath: string): string {
+  const normalized = filePath.trim().replace(/\//g, '\\');
+  if (!normalized) {
+    return '';
+  }
+
+  const segments = normalized.split('\\').filter(Boolean);
+  if (segments.length <= 1) {
+    return normalized;
+  }
+
+  segments.pop();
+  if (/^[a-zA-Z]:$/u.test(segments[0])) {
+    return `${segments[0]}\\${segments.slice(1).join('\\')}`.replace(/[\\/]+$/u, '') || `${segments[0]}\\`;
+  }
+
+  return segments.join('\\');
+}
+
+// 为了在浏览器兜底环境里把监测目录回退到上一级。
+function getParentInstallDir(directoryPath: string): string {
+  const normalized = directoryPath.trim().replace(/[\\/]+$/u, '');
+  if (!normalized) {
+    return '';
+  }
+
+  const segments = normalized.split('\\').filter(Boolean);
+  if (segments.length <= 1) {
+    return normalized;
+  }
+
+  segments.pop();
+  if (/^[a-zA-Z]:$/u.test(segments[0])) {
+    return `${segments[0]}\\${segments.slice(1).join('\\')}`.replace(/[\\/]+$/u, '') || `${segments[0]}\\`;
+  }
+
+  return segments.join('\\');
+}
+
+// 为了在浏览器兜底环境里生成 app 级状态列表。
+function buildAppStatuses(state: MockState): AppStatus[] {
+  const seenAppIds = new Set<string>();
+
+  return state.presets.flatMap((preset) =>
+    preset.apps.flatMap((appEntry) => {
+      if (seenAppIds.has(appEntry.id)) {
+        return [];
+      }
+
+      seenAppIds.add(appEntry.id);
+      return [
+        {
+          appId: appEntry.id,
+          isRunning: state.runningAppIds.includes(appEntry.id),
+        },
+      ];
+    }),
+  );
+}
+
+// 为了在浏览器兜底环境里查找命中的高风险应用。
+function inferRiskyApps(state: MockState, presetId: string): string[] {
+  const preset = state.presets.find((item) => item.id === presetId);
+  if (!preset) {
+    return [];
+  }
+
+  const runningIds = new Set(state.runningAppIds);
+  return preset.apps
+    .filter((appEntry) => runningIds.has(appEntry.id))
+    .filter((appEntry) => HIGH_RISK_PROCESS_NAMES.has(`${pathBaseName(appEntry.exePath).toLowerCase()}.exe`))
+    .map((appEntry) => appEntry.name);
+}
 
 function defaultState(): MockState {
   const apps = scannedApps.map((app) => toAppEntry(app));
@@ -134,34 +199,8 @@ function writeState(state: MockState): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function buildStatuses(state: MockState): PresetStatus[] {
-  const runningIds = new Set(state.runningAppIds);
-
-  return state.presets
-    .slice()
-    .sort((left, right) => left.order - right.order)
-    .map((preset) => {
-      const runningCount = preset.apps.filter((app) => runningIds.has(app.id)).length;
-      const totalCount = preset.apps.length;
-      let status: RunStatus = 'stopped';
-
-      if (runningCount > 0 && runningCount < totalCount) {
-        status = 'partial';
-      } else if (totalCount > 0 && runningCount === totalCount) {
-        status = 'running';
-      }
-
-      return {
-        presetId: preset.id,
-        runningCount,
-        totalCount,
-        status,
-      };
-    });
-}
-
 function emitStatuses(state = readState()): void {
-  const statuses = buildStatuses(state);
+  const statuses = buildAppStatuses(state);
   listeners.forEach((listener) => listener(statuses));
 }
 
@@ -170,19 +209,6 @@ function updateState(updater: (current: MockState) => MockState): MockState {
   writeState(nextState);
   emitStatuses(nextState);
   return nextState;
-}
-
-function inferRiskyApps(state: MockState, presetId: string): string[] {
-  const preset = state.presets.find((item) => item.id === presetId);
-  if (!preset) {
-    return [];
-  }
-
-  const runningIds = new Set(state.runningAppIds);
-  return preset.apps
-    .filter((app) => runningIds.has(app.id))
-    .filter((app) => app.customProcessNames.some((name) => HIGH_RISK_PROCESSES.has(name.toLowerCase())))
-    .map((app) => app.name);
 }
 
 export function installMockElectronApi(): void {
@@ -206,7 +232,7 @@ export function installMockElectronApi(): void {
         }
 
         const runningAppIds = new Set(current.runningAppIds);
-        preset.apps.forEach((app) => runningAppIds.add(app.id));
+        preset.apps.forEach((appEntry) => runningAppIds.add(appEntry.id));
         return {
           ...current,
           runningAppIds: Array.from(runningAppIds),
@@ -226,7 +252,7 @@ export function installMockElectronApi(): void {
           return state;
         }
 
-        const appIds = new Set(preset.apps.map((app) => app.id));
+        const appIds = new Set(preset.apps.map((appEntry) => appEntry.id));
         return {
           ...state,
           runningAppIds: state.runningAppIds.filter((appId) => !appIds.has(appId)),
@@ -242,7 +268,7 @@ export function installMockElectronApi(): void {
           return state;
         }
 
-        const appIds = new Set(preset.apps.map((app) => app.id));
+        const appIds = new Set(preset.apps.map((appEntry) => appEntry.id));
         return {
           ...state,
           runningAppIds: state.runningAppIds.filter((appId) => !appIds.has(appId)),
@@ -258,10 +284,12 @@ export function installMockElectronApi(): void {
       return settings;
     },
     appScanInstalled: async () => scannedApps,
-    getCurrentStatuses: async () => buildStatuses(readState()),
+    pathGetDefaultInstallDir: async (filePath) => getDefaultInstallDir(filePath),
+    pathGetParentDir: async (directoryPath) => getParentInstallDir(directoryPath),
+    getCurrentStatuses: async () => buildAppStatuses(readState()),
     onStatusUpdate: (callback) => {
       listeners.add(callback);
-      callback(buildStatuses(readState()));
+      callback(buildAppStatuses(readState()));
       return () => listeners.delete(callback);
     },
   };

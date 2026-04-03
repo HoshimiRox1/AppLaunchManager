@@ -4,7 +4,6 @@
   exePath: string;
   installDir: string;
   iconPath: string;
-  customProcessNames: string[];
 }
 
 export interface Preset {
@@ -29,12 +28,16 @@ export interface PresetStatus {
   status: RunStatus;
 }
 
+export interface AppStatus {
+  appId: string;
+  isRunning: boolean;
+}
+
 export interface ScannedApp {
   name: string;
   exePath: string;
   installDir: string;
   iconPath: string;
-  customProcessNames: string[];
 }
 
 export interface StopPresetResponse {
@@ -51,6 +54,8 @@ export interface ElectronAPI {
   settingsGet: () => Promise<Settings>;
   settingsSave: (settings: Settings) => Promise<Settings>;
   appScanInstalled: () => Promise<ScannedApp[]>;
-  getCurrentStatuses: () => Promise<PresetStatus[]>;
-  onStatusUpdate: (callback: (statuses: PresetStatus[]) => void) => () => void;
+  pathGetDefaultInstallDir: (filePath: string) => Promise<string>;
+  pathGetParentDir: (directoryPath: string) => Promise<string>;
+  getCurrentStatuses: () => Promise<AppStatus[]>;
+  onStatusUpdate: (callback: (statuses: AppStatus[]) => void) => () => void;
 }

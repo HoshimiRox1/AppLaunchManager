@@ -16,7 +16,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Program Files\\Tencent\\QQ\\QQ.exe',
     installDir: 'C:\\Program Files\\Tencent\\QQ',
     iconPath: '',
-    customProcessNames: ['qq.exe'],
   },
   {
     id: 'app-wechat',
@@ -24,7 +23,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Program Files\\Tencent\\WeChat\\WeChat.exe',
     installDir: 'C:\\Program Files\\Tencent\\WeChat',
     iconPath: '',
-    customProcessNames: ['wechat.exe'],
   },
   {
     id: 'app-chrome',
@@ -32,7 +30,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     installDir: 'C:\\Program Files\\Google\\Chrome\\Application',
     iconPath: '',
-    customProcessNames: ['chrome.exe'],
   },
   {
     id: 'app-notion',
@@ -40,7 +37,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion\\Notion.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion',
     iconPath: '',
-    customProcessNames: ['notion.exe'],
   },
   {
     id: 'app-spotify',
@@ -48,7 +44,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify\\Spotify.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify',
     iconPath: '',
-    customProcessNames: ['spotify.exe'],
   },
   {
     id: 'app-word',
@@ -56,7 +51,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE',
     installDir: 'C:\\Program Files\\Microsoft Office\\root\\Office16',
     iconPath: '',
-    customProcessNames: ['winword.exe'],
   },
   {
     id: 'app-code',
@@ -64,7 +58,6 @@ const DEFAULT_PRESET_APPS: AppEntry[] = [
     exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
     installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code',
     iconPath: '',
-    customProcessNames: ['code.exe'],
   },
 ];
 
@@ -90,7 +83,6 @@ function getLegacyMockFilePath(): string {
 function cloneAppEntry(appEntry: AppEntry): AppEntry {
   return {
     ...appEntry,
-    customProcessNames: appEntry.customProcessNames.slice(),
   };
 }
 
@@ -122,21 +114,19 @@ function createDefaultPresets(): Preset[] {
   ];
 }
 
-// 为了校验并清洗应用条目的落盘结构。
+// 为了兼容旧数据中的 customProcessNames 字段并清洗应用条目结构。
 function sanitizeAppEntry(value: unknown): AppEntry | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
 
-  const candidate = value as Partial<AppEntry>;
+  const candidate = value as Partial<AppEntry> & { customProcessNames?: unknown };
   if (
     typeof candidate.id !== 'string' ||
     typeof candidate.name !== 'string' ||
     typeof candidate.exePath !== 'string' ||
     typeof candidate.installDir !== 'string' ||
-    typeof candidate.iconPath !== 'string' ||
-    !Array.isArray(candidate.customProcessNames) ||
-    candidate.customProcessNames.some((processName) => typeof processName !== 'string')
+    typeof candidate.iconPath !== 'string'
   ) {
     return null;
   }
@@ -147,7 +137,6 @@ function sanitizeAppEntry(value: unknown): AppEntry | null {
     exePath: candidate.exePath,
     installDir: candidate.installDir,
     iconPath: candidate.iconPath,
-    customProcessNames: candidate.customProcessNames.slice(),
   };
 }
 
@@ -271,4 +260,3 @@ export async function getPresets(): Promise<Preset[]> {
 export async function savePresets(presets: Preset[]): Promise<void> {
   writePresetsToStore(presets);
 }
-

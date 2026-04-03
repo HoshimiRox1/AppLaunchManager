@@ -1,20 +1,18 @@
 ﻿import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 
+import type { AppStatus } from '../src/types';
+import { registerPathIpc } from './ipc/registerPathIpc';
 import { registerPresetIpc } from './ipc/registerPresetIpc';
 import { registerScannerIpc } from './ipc/registerScannerIpc';
 import { registerSettingsIpc } from './ipc/registerSettingsIpc';
 import { logger } from './modules/logger';
+import { startPreset } from './modules/appLauncher';
+import { confirmStop, stopPreset } from './modules/appKiller';
+import { getStatuses, startMonitoring, stopMonitoring, subscribeToStatuses } from './modules/appMonitor';
+import { getRuntimePaths } from './modules/runtimePaths';
 import { getSettings, shouldHideWindowOnClose } from './modules/settingsService';
 import { destroyTray, syncTrayState, syncTrayStateFromSettings } from './modules/trayService';
-import {
-  confirmStop,
-  getStatuses,
-  startPreset,
-  stopPreset,
-  subscribeToStatuses,
-} from './mock/mockBackend';
-import { getRuntimePaths } from './modules/runtimePaths';
 
 const APP_ICON_PATH = path.resolve(process.cwd(), 'assets', 'icons', 'Feibi.png');
 
@@ -50,13 +48,14 @@ function configureProjectRuntime(): void {
   logger.info(MODULE_NAME, `运行时目录已初始化：${runtimePaths.runtimeRoot}`);
 }
 
-function sendStatuses(statuses: Awaited<ReturnType<typeof getStatuses>>): void {
+// 为了把最新应用状态推送到当前 renderer 进程。
+function sendStatuses(statuses: AppStatus[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
 
   mainWindow.webContents.send('monitor:statusUpdate', statuses);
-  logger.info(MODULE_NAME, `推送状态更新，数量：${statuses.length}`);
+  logger.info(MODULE_NAME, `推送应用状态更新，数量：${statuses.length}`);
 }
 
 function createWindow(): void {
@@ -109,6 +108,7 @@ function createWindow(): void {
 
 function registerIpcHandlers(): void {
   logger.info(MODULE_NAME, '注册 IPC 处理器');
+  registerPathIpc();
   registerPresetIpc();
   registerScannerIpc();
   registerSettingsIpc({
@@ -137,6 +137,7 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
   void syncTrayWithCurrentSettings();
+  void startMonitoring();
 
   unsubscribeStatuses = subscribeToStatuses((statuses) => {
     sendStatuses(statuses);
@@ -166,6 +167,7 @@ app.on('window-all-closed', () => {
 
 app.on('quit', () => {
   unsubscribeStatuses?.();
+  stopMonitoring();
   destroyTray();
   logger.info(MODULE_NAME, '应用已退出');
 });

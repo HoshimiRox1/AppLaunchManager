@@ -310,12 +310,6 @@ function fileNameWithoutExtension(fileName: string): string {
 }
 
 // 为了从可执行文件路径推导稳定的进程名字段。
-function buildProcessNames(exePath: string): string[] {
-  const fileName = path.win32.basename(exePath).toLowerCase();
-  return fileName ? [fileName] : [];
-}
-
-// 为了统一生成应用去重键。
 function getAppSourceKey(exePath: string): string {
   return exePath.toLowerCase();
 }
@@ -656,7 +650,6 @@ function toScannedApp(source: AppSource): ScannedApp {
       normalizeDirectoryPath(source.appPathsPath) ||
       normalizeDirectoryPath(path.win32.dirname(source.exePath)),
     iconPath: '',
-    customProcessNames: buildProcessNames(source.exePath),
   };
 }
 

@@ -17,7 +17,7 @@ interface ConfirmState {
 
 export default function App() {
   const { presets, isLoading, createPreset, updatePreset, deletePreset, reorderPresets } = usePresets();
-  const { getPresetStatus } = useProcessStatus();
+  const { getPresetStatus } = useProcessStatus(presets);
   const { settings, updateSetting } = useSettings();
   const appListState = useAppList();
 

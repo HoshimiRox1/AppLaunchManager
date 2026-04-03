@@ -22,13 +22,6 @@ export function pathBaseName(filePath: string): string {
   return lastPart.replace(/\.[^.]+$/, '');
 }
 
-export function inferInstallDir(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  const parts = normalized.split('/').filter(Boolean);
-  parts.pop();
-  return filePath.includes('\\') ? parts.join('\\') : parts.join('/');
-}
-
 export function initialsFromName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
@@ -41,7 +34,10 @@ export function initialsFromName(name: string): string {
 
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length > 1) {
-    return words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('');
+    return words
+      .slice(0, 2)
+      .map((word) => word[0]?.toUpperCase() ?? '')
+      .join('');
   }
 
   return trimmed.slice(0, 2).toUpperCase();
@@ -59,22 +55,25 @@ export function toAppEntry(scanned: ScannedApp): AppEntry {
     exePath: scanned.exePath,
     installDir: scanned.installDir,
     iconPath: scanned.iconPath,
-    customProcessNames: scanned.customProcessNames,
   };
 }
 
-export function createCustomAppEntry(input: { name?: string; exePath: string; iconPath: string }): AppEntry {
+export function createCustomAppEntry(input: {
+  name?: string;
+  exePath: string;
+  installDir: string;
+  iconPath: string;
+}): AppEntry {
   const exePath = input.exePath.trim();
+  const installDir = input.installDir.trim();
   const name = input.name?.trim() || pathBaseName(exePath);
-  const processName = `${pathBaseName(exePath).toLowerCase()}.exe`;
 
   return {
     id: crypto.randomUUID(),
     name,
     exePath,
-    installDir: inferInstallDir(exePath),
+    installDir,
     iconPath: input.iconPath,
-    customProcessNames: [processName],
   };
 }
 
