@@ -1,8 +1,9 @@
-﻿import { app } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { AppEntry, Preset, PresetStatus, RunStatus, ScannedApp, Settings } from '../src/types';
+import { logger } from './logger';
+import { getRuntimePaths } from './runtimePaths';
 
 interface MockDatabase {
   presets: Preset[];
@@ -21,6 +22,7 @@ const HIGH_RISK_PROCESSES = new Set([
 
 const listeners = new Set<(statuses: PresetStatus[]) => void>();
 let dbFilePath = '';
+const MODULE_NAME = 'mockBackend.ts';
 
 const installedApps: AppEntry[] = [
   {
@@ -128,14 +130,16 @@ function defaultState(): MockDatabase {
 
 function readDatabase(): MockDatabase {
   if (!dbFilePath) {
-    const userDataDir = app.getPath('userData');
-    mkdirSync(userDataDir, { recursive: true });
-    dbFilePath = path.join(userDataDir, 'launch-manager-mock.json');
+    const dataDir = getRuntimePaths().dataDir;
+    mkdirSync(dataDir, { recursive: true });
+    dbFilePath = path.join(dataDir, 'launch-manager-mock.json');
+    logger.info(MODULE_NAME, `初始化数据文件路径：${dbFilePath}`);
   }
 
   if (!existsSync(dbFilePath)) {
     const initialState = defaultState();
     writeFileSync(dbFilePath, JSON.stringify(initialState, null, 2), 'utf8');
+    logger.info(MODULE_NAME, '创建默认 mock 数据文件');
     return initialState;
   }
 
@@ -148,15 +152,17 @@ function readDatabase(): MockDatabase {
       settings: parsed.settings ?? fallback.settings,
       runningAppIds: parsed.runningAppIds ?? fallback.runningAppIds,
     };
-  } catch {
+  } catch (error) {
     const fallback = defaultState();
     writeFileSync(dbFilePath, JSON.stringify(fallback, null, 2), 'utf8');
+    logger.warn(MODULE_NAME, '读取 mock 数据失败，已回退到默认数据', error);
     return fallback;
   }
 }
 
 function writeDatabase(db: MockDatabase): void {
   writeFileSync(dbFilePath, JSON.stringify(db, null, 2), 'utf8');
+  logger.info(MODULE_NAME, '写入 mock 数据文件');
 }
 
 function getDatabase(): MockDatabase {
@@ -227,6 +233,7 @@ export async function getPresets(): Promise<Preset[]> {
 }
 
 export async function savePresets(presets: Preset[]): Promise<void> {
+  logger.info(MODULE_NAME, `保存预设列表，数量：${presets.length}`);
   updateDatabase((current) => {
     const validAppIds = new Set(presets.flatMap((preset) => preset.apps.map((appEntry) => appEntry.id)));
     return {
@@ -238,6 +245,7 @@ export async function savePresets(presets: Preset[]): Promise<void> {
 }
 
 export async function startPreset(presetId: string): Promise<void> {
+  logger.info(MODULE_NAME, `启动预设：${presetId}`);
   updateDatabase((current) => {
     const preset = current.presets.find((item) => item.id === presetId);
     if (!preset) {
@@ -257,6 +265,7 @@ export async function startPreset(presetId: string): Promise<void> {
 export async function stopPreset(
   presetId: string,
 ): Promise<{ needsConfirm: boolean; riskyApps: string[] }> {
+  logger.info(MODULE_NAME, `尝试关闭预设：${presetId}`);
   const current = getDatabase();
   const preset = current.presets.find((item) => item.id === presetId);
 
@@ -271,6 +280,7 @@ export async function stopPreset(
   const riskyApps = inferRiskyApps(preset, runningIds);
 
   if (riskyApps.length > 0) {
+    logger.warn(MODULE_NAME, `预设存在高风险应用，等待确认：${riskyApps.join(', ')}`);
     return {
       needsConfirm: true,
       riskyApps,
@@ -285,6 +295,7 @@ export async function stopPreset(
 }
 
 export async function confirmStop(presetId: string): Promise<void> {
+  logger.info(MODULE_NAME, `确认关闭预设：${presetId}`);
   updateDatabase((current) => {
     const preset = current.presets.find((item) => item.id === presetId);
     if (!preset) {
@@ -304,6 +315,7 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<Settings> {
+  logger.info(MODULE_NAME, '保存设置项');
   updateDatabase((current) => ({
     ...current,
     settings,
@@ -312,6 +324,7 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
 }
 
 export async function scanInstalledApps(): Promise<ScannedApp[]> {
+  logger.info(MODULE_NAME, `扫描 mock 应用列表，数量：${installedApps.length}`);
   return installedApps.map(({ name, exePath, installDir, iconPath, customProcessNames }) => ({
     name,
     exePath,
@@ -320,5 +333,3 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     customProcessNames,
   }));
 }
-
-

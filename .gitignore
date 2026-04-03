@@ -1,6 +1,7 @@
 node_modules/
 dist-electron/
 .vite/
+.runtime/
 
 AGENTS.md
 前端架构设计.md
