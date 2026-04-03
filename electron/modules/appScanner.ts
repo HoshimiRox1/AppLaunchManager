@@ -1,11 +1,22 @@
-﻿import { existsSync, readdirSync, statSync } from 'node:fs';
+﻿import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { shell } from 'electron';
-import { enumerateKeysSafe, enumerateValuesSafe, HKEY } from 'registry-js';
 
 import type { ScannedApp } from '../../src/types';
 import { logger } from './logger';
+
+const HKEY = {
+  HKEY_CLASSES_ROOT: 'HKEY_CLASSES_ROOT',
+  HKEY_CURRENT_CONFIG: 'HKEY_CURRENT_CONFIG',
+  HKEY_CURRENT_USER_LOCAL_SETTINGS: 'HKEY_CURRENT_USER_LOCAL_SETTINGS',
+  HKEY_CURRENT_USER: 'HKEY_CURRENT_USER',
+  HKEY_LOCAL_MACHINE: 'HKEY_LOCAL_MACHINE',
+  HKEY_USERS: 'HKEY_USERS',
+} as const;
+
+type HKEY = (typeof HKEY)[keyof typeof HKEY];
 
 interface RegistryBranch {
   hive: HKEY;
@@ -120,6 +131,77 @@ function cleanText(value?: string | null): string {
   }
 
   return String(value).replace(/^\uFEFF/u, '').replace(/\0/g, '').trim();
+}
+
+// 为了生成 reg.exe 可识别的完整注册表路径。
+function getRegistryQueryPath(branch: RegistryBranch, keyName?: string): string {
+  return keyName ? `${branch.hive}\\${branch.subkey}\\${keyName}` : `${branch.hive}\\${branch.subkey}`;
+}
+
+// 为了通过系统 reg.exe 读取注册表原始输出。
+function runRegistryQuery(queryPath: string): string {
+  try {
+    return execFileSync('cmd.exe', ['/d', '/s', '/c', `chcp 65001>nul & reg query "${queryPath}"`], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+// 为了从 reg.exe 输出中提取直接子键名称。
+function parseRegistrySubkeyNames(output: string, queryPath: string): string[] {
+  const normalizedQueryPath = queryPath.toUpperCase();
+  const keyNames = new Map<string, string>();
+
+  output
+    .split(/\r?\n/u)
+    .map((line) => cleanText(line))
+    .filter((line) => line.toUpperCase().startsWith(`${normalizedQueryPath}\\`))
+    .forEach((line) => {
+      const subkeyPath = line.slice(queryPath.length + 1);
+      if (!subkeyPath || subkeyPath.includes('\\')) {
+        return;
+      }
+
+      keyNames.set(subkeyPath.toLowerCase(), subkeyPath);
+    });
+
+  return Array.from(keyNames.values());
+}
+
+// 为了把 reg.exe 的键值行解析成统一的字段结构。
+function parseRegistryValueLine(line: string): RegistryValueEntry | null {
+  const normalizedLine = line.trim();
+  if (!normalizedLine || normalizedLine.startsWith('HKEY_')) {
+    return null;
+  }
+
+  const segments = normalizedLine.split(/\t+|\s{2,}/u).map((segment) => segment.trim());
+  if (segments.length < 3) {
+    return null;
+  }
+
+  const [rawName, rawType, ...rawDataSegments] = segments;
+  const rawData = rawDataSegments.join(' ').trim();
+  if (!rawType.startsWith('REG_')) {
+    return null;
+  }
+
+  const hexMatch = rawType === 'REG_DWORD' ? rawData.match(/^0x([0-9a-f]+)\b/iu) : null;
+  return {
+    name: rawName === '(Default)' ? '' : rawName,
+    data: hexMatch ? Number.parseInt(hexMatch[1], 16) : rawData,
+  };
+}
+
+// 为了从 reg.exe 输出中提取当前键下的所有值。
+function parseRegistryValues(output: string): RegistryValueEntry[] {
+  return output
+    .split(/\r?\n/u)
+    .map((line) => parseRegistryValueLine(line))
+    .filter((entry): entry is RegistryValueEntry => Boolean(entry));
 }
 
 // 为了展开注册表里常见的环境变量占位符。
@@ -242,7 +324,8 @@ function getRegistryStringValue(values: ReadonlyArray<RegistryValueEntry>, value
 // 为了安全读取注册表分支下的所有子键名。
 function enumerateBranchKeys(branch: RegistryBranch): string[] {
   try {
-    return [...enumerateKeysSafe(branch.hive, branch.subkey)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry));
+    const queryPath = getRegistryQueryPath(branch);
+    return parseRegistrySubkeyNames(runRegistryQuery(queryPath), queryPath);
   } catch (error) {
     logger.warn(MODULE_NAME, `读取注册表子键失败：${formatRegistryBranch(branch)} | ${error instanceof Error ? error.message : String(error)}`);
     return [];
@@ -252,7 +335,7 @@ function enumerateBranchKeys(branch: RegistryBranch): string[] {
 // 为了安全读取单个注册表子键下的值集合。
 function enumerateBranchValues(branch: RegistryBranch, keyName: string): RegistryValueEntry[] {
   try {
-    return normalizeRegistryValues(enumerateValuesSafe(branch.hive, `${branch.subkey}\\${keyName}`));
+    return normalizeRegistryValues(parseRegistryValues(runRegistryQuery(getRegistryQueryPath(branch, keyName))));
   } catch (error) {
     logger.warn(
       MODULE_NAME,
@@ -696,5 +779,3 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     return [];
   }
 }
-
-

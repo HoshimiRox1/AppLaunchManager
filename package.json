@@ -1,6 +1,7 @@
 {
   "name": "launch-manager",
-  "version": "0.1.0",
+  "version": "1.0.1",
+  "author": "HoshimiRox1",
   "private": true,
   "description": "LaunchManager Electron UI prototype",
   "main": "./dist-electron/main/index.js",
@@ -9,7 +10,45 @@
     "dev:web": "vite",
     "dev:electron": "node scripts/electron-runner.cjs dev",
     "build": "node scripts/electron-runner.cjs build",
-    "preview": "node scripts/electron-runner.cjs preview"
+    "preview": "node scripts/electron-runner.cjs preview",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.launchmanager.app",
+    "productName": "LaunchManager",
+    "icon": "assets/icons/Feibi.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icons/Feibi.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -17,7 +56,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "registry-js": "^1.16.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -27,6 +65,7 @@
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "electron": "^35.2.1",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^3.1.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
