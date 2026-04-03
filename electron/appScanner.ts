@@ -1,6 +1,7 @@
-﻿import { existsSync, readdirSync } from 'node:fs';
+﻿import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { shell } from 'electron';
 import { enumerateKeysSafe, enumerateValuesSafe, HKEY } from 'registry-js';
 
 import type { ScannedApp } from '../src/types';
@@ -24,12 +25,30 @@ interface RegistryUninstallRecord {
   installLocation?: string;
 }
 
+interface ShortcutDirectoryGroup {
+  label: string;
+  directoryPaths: string[];
+}
+
+interface ShortcutRecord {
+  shortcutPath: string;
+  targetExePath: string;
+  workingDirectory: string;
+  shortcutName: string;
+  description: string;
+  iconSource: string;
+}
+
 interface AppSource {
   exePath: string;
   appPathsPath: string;
   appPathsKeyName: string;
   uninstallName: string;
   uninstallInstallLocation: string;
+  shortcutName: string;
+  shortcutDescription: string;
+  shortcutWorkingDirectory: string;
+  shortcutIconSource: string;
 }
 
 interface RegistryValueEntry {
@@ -66,7 +85,33 @@ const UNINSTALL_REGISTRY_BRANCHES: RegistryBranch[] = [
     subkey: 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
   },
 ];
+const START_MENU_SHORTCUT_GROUP: ShortcutDirectoryGroup = {
+  label: '开始菜单',
+  directoryPaths: [
+    process.env.APPDATA ? path.win32.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '',
+    process.env.ProgramData ? path.win32.join(process.env.ProgramData, 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '',
+  ],
+};
+const DESKTOP_SHORTCUT_GROUP: ShortcutDirectoryGroup = {
+  label: '桌面',
+  directoryPaths: [
+    process.env.USERPROFILE ? path.win32.join(process.env.USERPROFILE, 'Desktop') : '',
+    process.env.PUBLIC ? path.win32.join(process.env.PUBLIC, 'Desktop') : '',
+  ],
+};
 const EXCLUDED_EXECUTABLE_PATTERNS = ['uninstall', 'setup', 'update', 'updater', 'helper', 'crash', 'repair'];
+
+/*
+当前解决方案：
+1. 保留注册表扫描作为第一来源。
+2. 增加开始菜单与桌面快捷方式扫描，补齐飞书这类注册表缺失应用。
+3. 使用 Electron 自带 shell.readShortcutLink() 解析 .lnk，并与注册表结果按 exePath 去重合并。
+
+可优雅化的替代方案：
+1. 把注册表扫描、快捷方式扫描、.lnk 解析拆成独立模块，避免 appScanner.ts 继续膨胀。
+2. 为扫描结果建立缓存与增量刷新机制，减少每次打开应用列表时的全量遍历成本。
+3. 若后续需要更强兼容性，可引入统一的 Windows 应用发现层，集中处理注册表、快捷方式、应用商店入口和图标提取。
+*/
 
 // 为了清洗注册表和文件系统里的文本噪音。
 function cleanText(value?: string | null): string {
@@ -104,15 +149,24 @@ function cleanRegistryValue(value?: string | null): string {
   return cleanText(expandEnvironmentVariables(String(value))).replace(/^['"]+|['"]+$/g, '').replace(/\//g, '\\');
 }
 
-// 为了规范化 Windows 目录路径并去掉末尾分隔符。
-function normalizeDirectoryPath(directoryPath?: string | null): string {
-  const cleaned = cleanRegistryValue(directoryPath);
+// 为了规范化 Windows 文件路径。
+function normalizeFilePath(filePath?: string | null): string {
+  const cleaned = cleanRegistryValue(filePath);
   if (!cleaned) {
     return '';
   }
 
-  const normalized = path.win32.normalize(cleaned);
-  return normalized.replace(/[\\/]+$/u, '');
+  return path.win32.normalize(cleaned);
+}
+
+// 为了规范化 Windows 目录路径并去掉末尾分隔符。
+function normalizeDirectoryPath(directoryPath?: string | null): string {
+  const cleaned = normalizeFilePath(directoryPath);
+  if (!cleaned) {
+    return '';
+  }
+
+  return cleaned.replace(/[\\/]+$/u, '');
 }
 
 // 为了移除 DisplayIcon 尾部的资源索引标记。
@@ -137,6 +191,19 @@ function extractExecutablePath(rawValue?: string | null): string {
   }
 
   return path.win32.normalize(normalized);
+}
+
+// 为了验证候选路径是否真的是本地可执行文件。
+function isExistingExecutableFile(filePath: string): boolean {
+  if (!filePath || path.win32.extname(filePath).toLowerCase() !== '.exe') {
+    return false;
+  }
+
+  try {
+    return existsSync(filePath) && statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 // 为了统一比较文件名和显示名称的相似度。
@@ -267,6 +334,10 @@ function getOrCreateSource(sources: Map<string, AppSource>, exePath: string): Ap
     appPathsKeyName: '',
     uninstallName: '',
     uninstallInstallLocation: '',
+    shortcutName: '',
+    shortcutDescription: '',
+    shortcutWorkingDirectory: '',
+    shortcutIconSource: '',
   };
   sources.set(sourceKey, created);
   return created;
@@ -362,6 +433,106 @@ function inferExecutableFromInstallLocation(record: RegistryUninstallRecord): st
   return scoredCandidates.length === 1 ? scoredCandidates[0].path : '';
 }
 
+// 为了递归收集目录下所有快捷方式路径。
+function collectShortcutPaths(directoryPath: string): string[] {
+  const normalizedDirectory = normalizeDirectoryPath(directoryPath);
+  if (!normalizedDirectory || !existsSync(normalizedDirectory)) {
+    return [];
+  }
+
+  let entries;
+  try {
+    entries = readdirSync(normalizedDirectory, { withFileTypes: true });
+  } catch (error) {
+    logger.warn(
+      MODULE_NAME,
+      `读取快捷方式目录失败：${normalizedDirectory} | ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
+
+  return entries.flatMap((entry) => {
+    const fullPath = path.win32.join(normalizedDirectory, entry.name);
+    if (entry.isDirectory()) {
+      return collectShortcutPaths(fullPath);
+    }
+
+    if (entry.isFile() && path.win32.extname(entry.name).toLowerCase() === '.lnk') {
+      return [fullPath];
+    }
+
+    return [];
+  });
+}
+
+// 为了读取单个快捷方式并转成统一的应用候选记录。
+function readShortcutRecord(shortcutPath: string): ShortcutRecord | null {
+  const normalizedShortcutPath = normalizeFilePath(shortcutPath);
+  const shortcutName = fileNameWithoutExtension(path.win32.basename(normalizedShortcutPath));
+
+  let shortcutDetails: Electron.ShortcutDetails;
+  try {
+    shortcutDetails = shell.readShortcutLink(normalizedShortcutPath);
+  } catch (error) {
+    logger.warn(
+      MODULE_NAME,
+      `解析快捷方式失败：${normalizedShortcutPath} | ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+
+  const targetExePath = extractExecutablePath(shortcutDetails.target);
+  if (!targetExePath) {
+    logger.warn(MODULE_NAME, `快捷方式目标不是本地 exe，已跳过：${normalizedShortcutPath}`);
+    return null;
+  }
+
+  if (!isExistingExecutableFile(targetExePath)) {
+    logger.warn(MODULE_NAME, `快捷方式目标不存在或不可用，已跳过：${normalizedShortcutPath} -> ${targetExePath}`);
+    return null;
+  }
+
+  const targetExeName = path.win32.basename(targetExePath);
+  if (isExcludedExecutableName(targetExeName) || isExcludedExecutableName(shortcutName)) {
+    logger.warn(MODULE_NAME, `快捷方式命中过滤规则，已跳过：${normalizedShortcutPath} -> ${targetExeName}`);
+    return null;
+  }
+
+  return {
+    shortcutPath: normalizedShortcutPath,
+    targetExePath,
+    workingDirectory: normalizeDirectoryPath(shortcutDetails.cwd),
+    shortcutName: cleanText(shortcutName),
+    description: cleanText(shortcutDetails.description),
+    iconSource: cleanRegistryValue(shortcutDetails.icon),
+  };
+}
+
+// 为了扫描一组快捷方式目录并输出有效记录。
+function scanShortcutGroup(group: ShortcutDirectoryGroup): ShortcutRecord[] {
+  const shortcutPathMap = new Map<string, string>();
+  group.directoryPaths
+    .map((directoryPath) => normalizeDirectoryPath(directoryPath))
+    .filter(Boolean)
+    .forEach((directoryPath) => {
+      collectShortcutPaths(directoryPath).forEach((shortcutPath) => {
+        const normalizedShortcutPath = normalizeFilePath(shortcutPath);
+        shortcutPathMap.set(normalizedShortcutPath.toLowerCase(), normalizedShortcutPath);
+      });
+    });
+
+  const shortcutPaths = Array.from(shortcutPathMap.values());
+  const records = shortcutPaths
+    .map((shortcutPath) => readShortcutRecord(shortcutPath))
+    .filter((record): record is ShortcutRecord => Boolean(record));
+
+  logger.info(
+    MODULE_NAME,
+    `${group.label}快捷方式扫描完成，快捷方式：${shortcutPaths.length}，有效：${records.length}`,
+  );
+  return records;
+}
+
 // 为了把 App Paths 数据合并为基础应用来源。
 function mergeAppPathSources(records: RegistryAppPathRecord[], sources: Map<string, AppSource>): void {
   records.forEach((record) => {
@@ -442,13 +613,38 @@ function mergeUninstallMetadata(records: RegistryUninstallRecord[], sources: Map
   });
 }
 
+// 为了把快捷方式中的应用候选合并到统一来源集合。
+function mergeShortcutSources(records: ShortcutRecord[], sources: Map<string, AppSource>): void {
+  records.forEach((record) => {
+    const source = getOrCreateSource(sources, record.targetExePath);
+
+    if (record.shortcutName && !source.shortcutName) {
+      source.shortcutName = record.shortcutName;
+    }
+
+    if (record.description && !source.shortcutDescription) {
+      source.shortcutDescription = record.description;
+    }
+
+    if (record.workingDirectory && !source.shortcutWorkingDirectory) {
+      source.shortcutWorkingDirectory = record.workingDirectory;
+    }
+
+    if (record.iconSource && !source.shortcutIconSource) {
+      source.shortcutIconSource = record.iconSource;
+    }
+  });
+}
+
 // 为了把内部来源对象转换为前端可消费的扫描结果。
 function toScannedApp(source: AppSource): ScannedApp {
   const exeName = path.win32.basename(source.exePath);
   const name =
     cleanRegistryValue(source.uninstallName) ||
-    fileNameWithoutExtension(exeName) ||
+    cleanText(source.shortcutName) ||
+    cleanText(source.shortcutDescription) ||
     cleanRegistryValue(source.appPathsKeyName) ||
+    fileNameWithoutExtension(exeName) ||
     '应用';
 
   return {
@@ -456,6 +652,7 @@ function toScannedApp(source: AppSource): ScannedApp {
     exePath: source.exePath,
     installDir:
       normalizeDirectoryPath(source.uninstallInstallLocation) ||
+      normalizeDirectoryPath(source.shortcutWorkingDirectory) ||
       normalizeDirectoryPath(source.appPathsPath) ||
       normalizeDirectoryPath(path.win32.dirname(source.exePath)),
     iconPath: '',
@@ -475,7 +672,7 @@ function sortScannedApps(apps: ScannedApp[]): ScannedApp[] {
   });
 }
 
-// 为了扫描注册表中的已安装应用并生成应用列表。
+// 为了扫描多来源中的已安装应用并生成统一应用列表。
 export async function scanInstalledApps(): Promise<ScannedApp[]> {
   if (process.platform !== 'win32') {
     logger.warn(MODULE_NAME, '当前系统不是 Windows，返回空应用列表');
@@ -485,20 +682,25 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
   try {
     const appPathRecords = APP_PATH_REGISTRY_BRANCHES.flatMap((branch) => readAppPathBranch(branch));
     const uninstallRecords = UNINSTALL_REGISTRY_BRANCHES.flatMap((branch) => readUninstallBranch(branch));
+    const startMenuShortcutRecords = scanShortcutGroup(START_MENU_SHORTCUT_GROUP);
+    const desktopShortcutRecords = scanShortcutGroup(DESKTOP_SHORTCUT_GROUP);
     const sources = new Map<string, AppSource>();
 
     mergeAppPathSources(appPathRecords, sources);
     mergeUninstallSources(uninstallRecords, sources);
     mergeUninstallMetadata(uninstallRecords, sources);
+    mergeShortcutSources(startMenuShortcutRecords, sources);
+    mergeShortcutSources(desktopShortcutRecords, sources);
 
     const apps = sortScannedApps(Array.from(sources.values(), (source) => toScannedApp(source)));
     logger.info(
       MODULE_NAME,
-      `注册表应用扫描完成，App Paths：${appPathRecords.length}，Uninstall：${uninstallRecords.length}，结果：${apps.length}`,
+      `应用扫描完成，App Paths：${appPathRecords.length}，Uninstall：${uninstallRecords.length}，开始菜单快捷方式：${startMenuShortcutRecords.length}，桌面快捷方式：${desktopShortcutRecords.length}，结果：${apps.length}`,
     );
     return apps;
   } catch (error) {
-    logger.error(MODULE_NAME, `注册表应用扫描失败，返回空列表 | ${error instanceof Error ? error.message : String(error)}`);
+    logger.error(MODULE_NAME, `应用扫描失败，返回空列表 | ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
+
