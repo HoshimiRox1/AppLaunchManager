@@ -9,57 +9,6 @@ const MODULE_NAME = 'presetStore.ts';
 const PRESET_FILE_NAME = 'presets.json';
 const LEGACY_MOCK_FILE_NAME = 'launch-manager-mock.json';
 
-const DEFAULT_PRESET_APPS: AppEntry[] = [
-  {
-    id: 'app-qq',
-    name: 'QQ',
-    exePath: 'C:\\Program Files\\Tencent\\QQ\\QQ.exe',
-    installDir: 'C:\\Program Files\\Tencent\\QQ',
-    iconPath: '',
-  },
-  {
-    id: 'app-wechat',
-    name: '微信',
-    exePath: 'C:\\Program Files\\Tencent\\WeChat\\WeChat.exe',
-    installDir: 'C:\\Program Files\\Tencent\\WeChat',
-    iconPath: '',
-  },
-  {
-    id: 'app-chrome',
-    name: 'Chrome',
-    exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    installDir: 'C:\\Program Files\\Google\\Chrome\\Application',
-    iconPath: '',
-  },
-  {
-    id: 'app-notion',
-    name: 'Notion',
-    exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion\\Notion.exe',
-    installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Notion',
-    iconPath: '',
-  },
-  {
-    id: 'app-spotify',
-    name: 'Spotify',
-    exePath: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify\\Spotify.exe',
-    installDir: 'C:\\Users\\Public\\AppData\\Roaming\\Spotify',
-    iconPath: '',
-  },
-  {
-    id: 'app-word',
-    name: 'Word',
-    exePath: 'C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE',
-    installDir: 'C:\\Program Files\\Microsoft Office\\root\\Office16',
-    iconPath: '',
-  },
-  {
-    id: 'app-code',
-    name: 'VS Code',
-    exePath: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
-    installDir: 'C:\\Users\\Public\\AppData\\Local\\Programs\\Microsoft VS Code',
-    iconPath: '',
-  },
-];
 
 interface LegacyMockDatabase {
   presets?: unknown;
@@ -94,25 +43,6 @@ function clonePreset(preset: Preset): Preset {
   };
 }
 
-// 为了生成与当前 UI 一致的默认预设数据。
-function createDefaultPresets(): Preset[] {
-  const appMap = new Map(DEFAULT_PRESET_APPS.map((appEntry) => [appEntry.id, appEntry]));
-
-  return [
-    {
-      id: 'preset-work',
-      name: '办公模式',
-      order: 0,
-      apps: ['app-qq', 'app-wechat', 'app-chrome', 'app-notion'].map((appId) => cloneAppEntry(appMap.get(appId)!)),
-    },
-    {
-      id: 'preset-focus',
-      name: '专注开发',
-      order: 1,
-      apps: ['app-code', 'app-word', 'app-spotify'].map((appId) => cloneAppEntry(appMap.get(appId)!)),
-    },
-  ];
-}
 
 // 为了兼容旧数据中的 customProcessNames 字段并清洗应用条目结构。
 function sanitizeAppEntry(value: unknown): AppEntry | null {
@@ -221,7 +151,7 @@ function rebuildPresetFile(reason: string, error?: unknown): Preset[] {
     logger.info(MODULE_NAME, reason);
   }
 
-  const recoveredPresets = tryReadLegacyPresets() ?? createDefaultPresets();
+  const recoveredPresets = tryReadLegacyPresets() ?? [];
   return writePresetFile(recoveredPresets);
 }
 
