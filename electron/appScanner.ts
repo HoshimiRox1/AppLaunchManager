@@ -1,9 +1,15 @@
-﻿import { execFile } from 'node:child_process';
+﻿import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
+
+import { enumerateKeysSafe, enumerateValuesSafe, HKEY } from 'registry-js';
 
 import type { ScannedApp } from '../src/types';
 import { logger } from './logger';
+
+interface RegistryBranch {
+  hive: HKEY;
+  subkey: string;
+}
 
 interface RegistryAppPathRecord {
   keyName?: string;
@@ -26,145 +32,49 @@ interface AppSource {
   uninstallInstallLocation: string;
 }
 
-interface PowerShellJsonResult<T> {
-  ok?: boolean;
-  items?: T | T[] | null;
-  error?: string;
+interface RegistryValueEntry {
+  name: string;
+  data: string | number;
 }
 
-const execFileAsync = promisify(execFile);
 const MODULE_NAME = 'appScanner.ts';
-const APP_PATH_REGISTRY_PATHS = [
-  'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*',
-  'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*',
-  'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*',
+const APP_PATH_REGISTRY_BRANCHES: RegistryBranch[] = [
+  {
+    hive: HKEY.HKEY_LOCAL_MACHINE,
+    subkey: 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+  },
+  {
+    hive: HKEY.HKEY_LOCAL_MACHINE,
+    subkey: 'SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+  },
+  {
+    hive: HKEY.HKEY_CURRENT_USER,
+    subkey: 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+  },
 ];
-const UNINSTALL_REGISTRY_PATHS = [
-  'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-  'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-  'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+const UNINSTALL_REGISTRY_BRANCHES: RegistryBranch[] = [
+  {
+    hive: HKEY.HKEY_LOCAL_MACHINE,
+    subkey: 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  },
+  {
+    hive: HKEY.HKEY_LOCAL_MACHINE,
+    subkey: 'SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  },
+  {
+    hive: HKEY.HKEY_CURRENT_USER,
+    subkey: 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  },
 ];
+const EXCLUDED_EXECUTABLE_PATTERNS = ['uninstall', 'setup', 'update', 'updater', 'helper', 'crash', 'repair'];
 
-// 为了安全拼接 PowerShell 单引号字符串。
-function escapePowerShellString(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
-// 为了清洗 UTF-8 文本里的空字符和 BOM 噪音。
-function cleanUtf8Text(value?: string | null): string {
+// 为了清洗注册表和文件系统里的文本噪音。
+function cleanText(value?: string | null): string {
   if (!value) {
     return '';
   }
 
   return String(value).replace(/^\uFEFF/u, '').replace(/\0/g, '').trim();
-}
-
-// 为了把 PowerShell 结果里的 items 字段统一成数组结构。
-function normalizeResultItems<T>(value: T | T[] | null | undefined): T[] {
-  if (!value) {
-    return [];
-  }
-
-  return Array.isArray(value) ? value : [value];
-}
-
-// 为了格式化 PowerShell 返回的错误消息用于日志记录。
-function formatPowerShellError(errorMessage: string, registryPath: string): string {
-  const cleaned = cleanUtf8Text(errorMessage).replace(/\s+/g, ' ');
-  return `读取注册表分支失败：${registryPath} | ${cleaned || '未知错误'}`;
-}
-
-// 为了执行 PowerShell 并按 UTF-8 JSON 结果读取注册表数据。
-async function runPowerShellJson<T>(script: string, registryPath: string): Promise<T[]> {
-  const { stdout } = await execFileAsync(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-    {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
-    },
-  );
-
-  const normalizedOutput = cleanUtf8Text(stdout);
-  if (!normalizedOutput) {
-    return [];
-  }
-
-  const parsed = JSON.parse(normalizedOutput) as PowerShellJsonResult<T> | null;
-  if (!parsed) {
-    return [];
-  }
-
-  if (parsed.ok === false) {
-    throw new Error(formatPowerShellError(parsed.error ?? '', registryPath));
-  }
-
-  return normalizeResultItems(parsed.items);
-}
-
-// 为了生成读取 App Paths 分支的多行 PowerShell 脚本。
-function buildAppPathsScript(registryPath: string): string {
-  const escapedPath = escapePowerShellString(registryPath);
-  return [
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-    "$ErrorActionPreference = 'Stop'",
-    'try {',
-    `  $root = '${escapedPath}'`,
-    "  $basePath = $root.TrimEnd('*')",
-    '  if (-not (Test-Path -Path $basePath)) {',
-    '    [PSCustomObject]@{ ok = $true; items = @() } | ConvertTo-Json -Depth 6 -Compress',
-    '    exit 0',
-    '  }',
-    '  $items = @(',
-    '    Get-ChildItem -Path $root -ErrorAction Stop | ForEach-Object {',
-    '      $properties = Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue',
-    '      [PSCustomObject]@{',
-    '        keyName = $_.PSChildName',
-    "        defaultValue = [string]$properties.'(default)'",
-    '        path = [string]$properties.Path',
-    '      }',
-    '    }',
-    '  )',
-    '  [PSCustomObject]@{ ok = $true; items = $items } | ConvertTo-Json -Depth 6 -Compress',
-    '} catch {',
-    "  $errorMessage = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { $_ | Out-String }",
-    '  [PSCustomObject]@{ ok = $false; error = [string]$errorMessage } | ConvertTo-Json -Depth 6 -Compress',
-    '  exit 0',
-    '}',
-  ].join('\n');
-}
-
-// 为了生成读取 Uninstall 分支的多行 PowerShell 脚本。
-function buildUninstallScript(registryPath: string): string {
-  const escapedPath = escapePowerShellString(registryPath);
-  return [
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-    "$ErrorActionPreference = 'Stop'",
-    'try {',
-    `  $root = '${escapedPath}'`,
-    "  $basePath = $root.TrimEnd('*')",
-    '  if (-not (Test-Path -Path $basePath)) {',
-    '    [PSCustomObject]@{ ok = $true; items = @() } | ConvertTo-Json -Depth 6 -Compress',
-    '    exit 0',
-    '  }',
-    '  $items = @(',
-    '    Get-ItemProperty -Path $root -ErrorAction Stop | ForEach-Object {',
-    '      [PSCustomObject]@{',
-    '        keyName = $_.PSChildName',
-    '        displayName = [string]$_.DisplayName',
-    '        displayIcon = [string]$_.DisplayIcon',
-    '        installLocation = [string]$_.InstallLocation',
-    '      }',
-    '    }',
-    '  )',
-    '  [PSCustomObject]@{ ok = $true; items = $items } | ConvertTo-Json -Depth 6 -Compress',
-    '} catch {',
-    "  $errorMessage = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { $_ | Out-String }",
-    '  [PSCustomObject]@{ ok = $false; error = [string]$errorMessage } | ConvertTo-Json -Depth 6 -Compress',
-    '  exit 0',
-    '}',
-  ].join('\n');
 }
 
 // 为了展开注册表里常见的环境变量占位符。
@@ -180,18 +90,18 @@ function expandEnvironmentVariables(value: string): string {
   });
 }
 
+// 为了生成稳定可读的注册表分支日志标识。
+function formatRegistryBranch(branch: RegistryBranch): string {
+  return `${branch.hive}\\${branch.subkey}`;
+}
+
 // 为了清洗注册表里的路径类字符串。
 function cleanRegistryValue(value?: string | null): string {
   if (!value) {
     return '';
   }
 
-  return cleanUtf8Text(expandEnvironmentVariables(String(value))).replace(/^['"]+|['"]+$/g, '').replace(/\//g, '\\');
-}
-
-// 为了移除 DisplayIcon 尾部的资源索引标记。
-function stripIconIndexSuffix(value: string): string {
-  return value.replace(/,\s*-?\d+\s*$/u, '').trim();
+  return cleanText(expandEnvironmentVariables(String(value))).replace(/^['"]+|['"]+$/g, '').replace(/\//g, '\\');
 }
 
 // 为了规范化 Windows 目录路径并去掉末尾分隔符。
@@ -203,6 +113,11 @@ function normalizeDirectoryPath(directoryPath?: string | null): string {
 
   const normalized = path.win32.normalize(cleaned);
   return normalized.replace(/[\\/]+$/u, '');
+}
+
+// 为了移除 DisplayIcon 尾部的资源索引标记。
+function stripIconIndexSuffix(value: string): string {
+  return value.replace(/,\s*-?\d+\s*$/u, '').trim();
 }
 
 // 为了从注册表原始值里提取可执行文件绝对路径。
@@ -224,15 +139,113 @@ function extractExecutablePath(rawValue?: string | null): string {
   return path.win32.normalize(normalized);
 }
 
-// 为了从可执行文件路径推导稳定的进程名字段。
-function buildProcessNames(exePath: string): string[] {
-  const fileName = path.win32.basename(exePath).toLowerCase();
-  return fileName ? [fileName] : [];
+// 为了统一比较文件名和显示名称的相似度。
+function normalizeComparableText(value: string): string {
+  return cleanText(value)
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/\.exe$/iu, '')
+    .replace(/[\s._()\-]+/gu, '');
+}
+
+// 为了判断候选可执行文件是否像主程序而不是工具程序。
+function isExcludedExecutableName(fileName: string): boolean {
+  const normalizedName = normalizeComparableText(fileName);
+  return EXCLUDED_EXECUTABLE_PATTERNS.some((pattern) => normalizedName.includes(pattern));
+}
+
+// 为了过滤注册表返回值中的异常项。
+function normalizeRegistryValues(values: ReadonlyArray<unknown>): RegistryValueEntry[] {
+  return values.filter((entry): entry is RegistryValueEntry => {
+    if (!entry || typeof entry !== 'object') {
+      return false;
+    }
+
+    const maybeEntry = entry as { name?: unknown; data?: unknown };
+    return typeof maybeEntry.name === 'string' && (typeof maybeEntry.data === 'string' || typeof maybeEntry.data === 'number');
+  });
+}
+
+// 为了从注册表值集合中提取字符串字段。
+function getRegistryStringValue(values: ReadonlyArray<RegistryValueEntry>, valueName: string): string {
+  const matchedValue = values.find((entry) => entry.name === valueName);
+  return matchedValue && typeof matchedValue.data === 'string' ? matchedValue.data : '';
+}
+
+// 为了安全读取注册表分支下的所有子键名。
+function enumerateBranchKeys(branch: RegistryBranch): string[] {
+  try {
+    return [...enumerateKeysSafe(branch.hive, branch.subkey)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry));
+  } catch (error) {
+    logger.warn(MODULE_NAME, `读取注册表子键失败：${formatRegistryBranch(branch)} | ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
+// 为了安全读取单个注册表子键下的值集合。
+function enumerateBranchValues(branch: RegistryBranch, keyName: string): RegistryValueEntry[] {
+  try {
+    return normalizeRegistryValues(enumerateValuesSafe(branch.hive, `${branch.subkey}\\${keyName}`));
+  } catch (error) {
+    logger.warn(
+      MODULE_NAME,
+      `读取注册表键值失败：${formatRegistryBranch(branch)}\\${keyName} | ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
+}
+
+// 为了读取 App Paths 分支里的原始应用记录。
+function readAppPathBranch(branch: RegistryBranch): RegistryAppPathRecord[] {
+  const keyNames = enumerateBranchKeys(branch);
+  const records = keyNames.map((keyName) => {
+    const values = enumerateBranchValues(branch, keyName);
+    return {
+      keyName,
+      defaultValue: getRegistryStringValue(values, ''),
+      path: getRegistryStringValue(values, 'Path'),
+    };
+  });
+
+  logger.info(MODULE_NAME, `读取 App Paths 分支成功：${formatRegistryBranch(branch)}，数量：${records.length}`);
+  return records;
+}
+
+// 为了读取 Uninstall 分支里的原始应用记录并隔离单键失败。
+function readUninstallBranch(branch: RegistryBranch): RegistryUninstallRecord[] {
+  const keyNames = enumerateBranchKeys(branch);
+  const records: RegistryUninstallRecord[] = [];
+
+  keyNames.forEach((keyName) => {
+    try {
+      const values = enumerateBranchValues(branch, keyName);
+      records.push({
+        keyName,
+        displayName: getRegistryStringValue(values, 'DisplayName'),
+        displayIcon: getRegistryStringValue(values, 'DisplayIcon'),
+        installLocation: getRegistryStringValue(values, 'InstallLocation'),
+      });
+    } catch (error) {
+      logger.warn(
+        MODULE_NAME,
+        `解析 Uninstall 子键失败：${formatRegistryBranch(branch)}\\${keyName} | ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  });
+
+  logger.info(MODULE_NAME, `读取 Uninstall 分支成功：${formatRegistryBranch(branch)}，数量：${records.length}`);
+  return records;
 }
 
 // 为了从文件名中提取无扩展名的展示名称。
 function fileNameWithoutExtension(fileName: string): string {
   return path.win32.basename(fileName, path.win32.extname(fileName));
+}
+
+// 为了从可执行文件路径推导稳定的进程名字段。
+function buildProcessNames(exePath: string): string[] {
+  const fileName = path.win32.basename(exePath).toLowerCase();
+  return fileName ? [fileName] : [];
 }
 
 // 为了统一生成应用去重键。
@@ -269,30 +282,84 @@ function registerInstallDir(installDirIndex: Map<string, string>, source: AppSou
   installDirIndex.set(installDir.toLowerCase(), getAppSourceKey(source.exePath));
 }
 
-// 为了读取单个 App Paths 注册表分支并容错降级。
-async function readAppPathBranch(registryPath: string): Promise<RegistryAppPathRecord[]> {
-  try {
-    const records = await runPowerShellJson<RegistryAppPathRecord>(buildAppPathsScript(registryPath), registryPath);
-    logger.info(MODULE_NAME, `读取 App Paths 分支成功：${registryPath}，数量：${records.length}`);
-    return records;
-  } catch (error) {
-    const message = cleanUtf8Text(error instanceof Error ? error.message : String(error));
-    logger.warn(MODULE_NAME, message || `读取 App Paths 分支失败：${registryPath}`);
-    return [];
+// 为了为安装目录中的可执行文件计算候选得分。
+function scoreExecutableCandidate(candidatePath: string, hints: string[]): number {
+  const baseName = fileNameWithoutExtension(path.win32.basename(candidatePath));
+  const normalizedCandidate = normalizeComparableText(baseName);
+  if (!normalizedCandidate) {
+    return -1;
   }
+
+  if (isExcludedExecutableName(baseName)) {
+    return -1;
+  }
+
+  let score = 0;
+  hints.forEach((hint) => {
+    if (!hint) {
+      return;
+    }
+
+    if (normalizedCandidate === hint) {
+      score += 100;
+      return;
+    }
+
+    if (normalizedCandidate.includes(hint) || hint.includes(normalizedCandidate)) {
+      score += 40;
+    }
+  });
+
+  return score;
 }
 
-// 为了读取单个 Uninstall 注册表分支并容错降级。
-async function readUninstallBranch(registryPath: string): Promise<RegistryUninstallRecord[]> {
-  try {
-    const records = await runPowerShellJson<RegistryUninstallRecord>(buildUninstallScript(registryPath), registryPath);
-    logger.info(MODULE_NAME, `读取 Uninstall 分支成功：${registryPath}，数量：${records.length}`);
-    return records;
-  } catch (error) {
-    const message = cleanUtf8Text(error instanceof Error ? error.message : String(error));
-    logger.warn(MODULE_NAME, message || `读取 Uninstall 分支失败：${registryPath}`);
-    return [];
+// 为了从安装目录中推导更像主程序的可执行文件。
+function inferExecutableFromInstallLocation(record: RegistryUninstallRecord): string {
+  const installDir = normalizeDirectoryPath(record.installLocation);
+  if (!installDir || !existsSync(installDir)) {
+    return '';
   }
+
+  let candidatePaths: string[] = [];
+  try {
+    candidatePaths = readdirSync(installDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((fileName) => path.win32.extname(fileName).toLowerCase() === '.exe')
+      .map((fileName) => path.win32.join(installDir, fileName));
+  } catch (error) {
+    logger.warn(
+      MODULE_NAME,
+      `读取安装目录失败：${installDir} | ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return '';
+  }
+
+  if (candidatePaths.length === 0) {
+    return '';
+  }
+
+  const hints = [record.displayName, record.keyName, path.win32.basename(installDir)]
+    .map((value) => normalizeComparableText(value ?? ''))
+    .filter(Boolean);
+
+  const scoredCandidates = candidatePaths
+    .map((candidatePath) => ({
+      path: candidatePath,
+      score: scoreExecutableCandidate(candidatePath, hints),
+    }))
+    .filter((candidate) => candidate.score >= 0)
+    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path, 'en'));
+
+  if (scoredCandidates.length === 0) {
+    return '';
+  }
+
+  if (scoredCandidates[0].score > 0) {
+    return scoredCandidates[0].path;
+  }
+
+  return scoredCandidates.length === 1 ? scoredCandidates[0].path : '';
 }
 
 // 为了把 App Paths 数据合并为基础应用来源。
@@ -317,10 +384,10 @@ function mergeAppPathSources(records: RegistryAppPathRecord[], sources: Map<stri
   });
 }
 
-// 为了把包含可执行路径的卸载项合并到应用来源。
+// 为了把卸载信息中的主程序路径合并到应用来源。
 function mergeUninstallSources(records: RegistryUninstallRecord[], sources: Map<string, AppSource>): void {
   records.forEach((record) => {
-    const exePath = extractExecutablePath(record.displayIcon);
+    const exePath = extractExecutablePath(record.displayIcon) || inferExecutableFromInstallLocation(record);
     if (!exePath) {
       return;
     }
@@ -345,7 +412,7 @@ function mergeUninstallMetadata(records: RegistryUninstallRecord[], sources: Map
   sources.forEach((source) => registerInstallDir(installDirIndex, source));
 
   records.forEach((record) => {
-    if (extractExecutablePath(record.displayIcon)) {
+    if (extractExecutablePath(record.displayIcon) || inferExecutableFromInstallLocation(record)) {
       return;
     }
 
@@ -416,13 +483,8 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
   }
 
   try {
-    const [appPathBranches, uninstallBranches] = await Promise.all([
-      Promise.all(APP_PATH_REGISTRY_PATHS.map((registryPath) => readAppPathBranch(registryPath))),
-      Promise.all(UNINSTALL_REGISTRY_PATHS.map((registryPath) => readUninstallBranch(registryPath))),
-    ]);
-
-    const appPathRecords = appPathBranches.flat();
-    const uninstallRecords = uninstallBranches.flat();
+    const appPathRecords = APP_PATH_REGISTRY_BRANCHES.flatMap((branch) => readAppPathBranch(branch));
+    const uninstallRecords = UNINSTALL_REGISTRY_BRANCHES.flatMap((branch) => readUninstallBranch(branch));
     const sources = new Map<string, AppSource>();
 
     mergeAppPathSources(appPathRecords, sources);
@@ -436,8 +498,7 @@ export async function scanInstalledApps(): Promise<ScannedApp[]> {
     );
     return apps;
   } catch (error) {
-    const message = cleanUtf8Text(error instanceof Error ? error.message : String(error));
-    logger.error(MODULE_NAME, message || '注册表应用扫描失败，返回空列表');
+    logger.error(MODULE_NAME, `注册表应用扫描失败，返回空列表 | ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
